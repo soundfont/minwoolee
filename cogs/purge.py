@@ -12,10 +12,10 @@ class Purge(commands.Cog):
             await ctx.send("Please specify an amount between 1 and 100.")
             return
         await ctx.channel.purge(limit=amount + 1)
-        await ctx.send(f"Cleared {amount} messages.", delete_after=5)
+        await ctx.send(f"Purged {amount} messages.", delete_after=5)
 
-    @clear.error
-    async def clear_error(self, ctx, error):
+    @purge.error
+    async def purge_error(self, ctx, error):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("You need 'Manage Messages' permission to use this command.")
         elif isinstance(error, commands.MissingRequiredArgument):
