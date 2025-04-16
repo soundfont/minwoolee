@@ -1,28 +1,20 @@
 import discord
 from discord.ext import commands
+import os
 
-class BasicCommands(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
+intents = discord.Intents.default()
+intents.message_content = True
 
-    @commands.command(name="membercount")
-    @commands.command(name="mc")  # This allows both .membercount and .mc
-    async def member_count(self, ctx):
-        """Shows the member count of the server."""
-        guild = ctx.guild
-        total_members = guild.member_count
-        humans = sum(1 for member in guild.members if not member.bot)
-        bots = total_members - humans
+bot = commands.Bot(command_prefix='.', intents=intents)
 
-        embed = discord.Embed(
-            title=f"Member Count for {guild.name}",
-            color=discord.Color.blue()
-        )
-        embed.add_field(name="Total Members", value=str(total_members), inline=False)
-        embed.add_field(name="Humans", value=str(humans), inline=False)
-        embed.add_field(name="Bots", value=str(bots), inline=False)
+@bot.event
+async def on_ready():
+    print(f"{bot.user} is online and ready.")
+    bot.load_extension("instagram")
+    bot.load_extension("membercount")
 
-        await ctx.send(embed=embed)
+# get your token from environment variable (safer than hardcoding)
+token = os.getenv("DISCORD_BOT_TOKEN")
 
-def setup(bot):
-    bot.add_cog(BasicCommands(bot))
+if __name__ == "__main__":
+    bot.run(token)
