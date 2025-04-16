@@ -1,6 +1,8 @@
 import discord
 from discord.ext import commands
 
+TOKEN = os.getenv('DISCORD_BOT_TOKEN')
+
 # Create the bot object with a command prefix
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix=".", intents=intents)
@@ -13,4 +15,4 @@ async def on_ready():
     bot.load_extension("membercount")
 
 # Run the bot with your token (this is where the token is used)
-bot.run('DISCORD_BOT_TOKEN')  # Your token goes here!
+bot.run(TOKEN)  # Your token goes here!
