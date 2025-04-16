@@ -1,7 +1,4 @@
-import discord
-from discord.ext import commands
-
-class BasicCommands(commands.Cog):
+class membercount(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
@@ -23,6 +20,3 @@ class BasicCommands(commands.Cog):
         embed.add_field(name="Bots", value=str(bots), inline=False)
 
         await ctx.send(embed=embed)
-
-def setup(bot):
-    bot.add_cog(BasicCommands(bot))
