@@ -1,5 +1,5 @@
 discord.py==2.2.2
 instaloader==4.10.1
 psycopg2==2.9.3
-aiohttp==3.8.1
+aiohttp
 asyncio==3.4.3
