@@ -12,7 +12,7 @@ async def on_ready():
 
 @bot.command()
 async def ping(ctx):
-    await ctx.send('pong!')
+    await ctx.send('pong')
 
 import os
 token = os.getenv('DISCORD_BOT_TOKEN')
