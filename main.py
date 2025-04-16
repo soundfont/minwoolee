@@ -9,7 +9,8 @@ bot = commands.Bot(command_prefix=".", intents=intents)
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
-    bot.load_extension("instagram")  # Load the Instagram cog synchronously
+    bot.load_extension("instagram")
+    bot.load_extension("membercount")
 
 # Run the bot with your token (this is where the token is used)
 bot.run('DISCORD_BOT_TOKEN')  # Your token goes here!
