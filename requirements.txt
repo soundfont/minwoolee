@@ -3,3 +3,4 @@ instaloader==4.10.1
 psycopg2==2.9.3
 aiohttp
 asyncio==3.4.3
+python-dotenv==1.0.0
