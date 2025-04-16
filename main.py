@@ -17,4 +17,4 @@ async def on_ready():
     await bot.load_extension("membercount")
 
 # Run the bot with your token (this is where the token is used)
-await bot.run(TOKEN)  # Your token goes here!
+bot.run(TOKEN)  # Your token goes here!
