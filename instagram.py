@@ -30,7 +30,7 @@ class InstagramCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.cache = load_cache()
-        self.loader = instaloader.Instaloader(download_stories=False, quiet=True)
+        self.loader = instaloader.Instaloader(quiet=True)
         self.check_instagram.start()
 
     def cog_unload(self):
