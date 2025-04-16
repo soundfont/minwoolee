@@ -39,4 +39,4 @@ class InstagramCog(commands.Cog):
         await ctx.send(f"Stopped monitoring Instagram account: {username}. (This feature can be expanded later.)")
 
 def setup(bot):
-    bot.add_cog(InstagramCog(bot))  # Add the InstagramCog to the bot
+    bot.add_cog(InstagramCog(bot))  # Add the InstagramCog to the bot without awaiting
