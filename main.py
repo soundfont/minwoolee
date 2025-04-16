@@ -1,3 +1,4 @@
+import os
 import discord
 from discord.ext import commands
 
@@ -13,5 +14,5 @@ async def on_ready():
 async def ping(ctx):
     await ctx.send('pong')
 
-# replace 'your_token_here' with your bot token
-bot.run('MTM2MTkyMjYwMTYyMjA0ODgxOQ.GNlgfG.P8_JvCx_15wdFgfLKliIsFOJyJjK19Xf5SCJLI')
+token = os.getenv('DISCORD_BOT_TOKEN')
+bot.run(token)
