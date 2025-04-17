@@ -55,12 +55,18 @@ class History(commands.Cog):
                 page_actions = actions[start_idx:end_idx]
                 description = ""
                 for action in page_actions:
-                    timestamp = discord.utils.format_dt(int(action["timestamp"]), style="R")
+                    try:
+                        timestamp = discord.utils.format_dt(int(action["timestamp"]), style="R")
+                    except (TypeError, ValueError) as e:
+                        timestamp = "Invalid timestamp"
+                        print(f"DEBUG: Invalid timestamp in action: {action}, error: {str(e)}")
                     reason = action["reason"] if action["reason"] else "No reason provided"
                     description += f"**Action:** {action['action']} | **Moderator:** {action['moderator'].mention} | **Time:** {timestamp}\n**Reason:** {reason}\n\n"
                 embed = utils.create_embed(ctx, title=f"Moderation History for {member}")
                 embed.description = description.strip()
-                embed.set_footer(text=f"Page {page_num}/{total_pages} | Requested by {ctx.author}")
+                print(f"DEBUG: Embed description length: {len(embed.description)}")  # Debug print
+                if len(embed.description) > 4096:
+                    embed.description = embed.description[:4000] + "... (Truncated)"
                 return embed
 
             # Send initial embed
@@ -107,6 +113,9 @@ class History(commands.Cog):
             await ctx.send("I don't have permission to manage reactions (requires 'Add Reactions', 'Manage Messages').")
         except discord.HTTPException as e:
             await ctx.send(f"Failed to fetch history: {str(e)}")
+        except Exception as e:
+            await ctx.send(f"Unexpected error during history command: {str(e)}")
+            raise e  # Re-raise for Heroku logs
 
     @history.error
     async def history_error(self, ctx, error):
@@ -115,7 +124,7 @@ class History(commands.Cog):
         elif isinstance(error, commands.MemberNotFound):
             await ctx.send("Member not found. Please provide a valid member (mention or ID).")
         elif isinstance(error, commands.CommandInvokeError):
-            await ctx.send("An error occurred while executing the history command.")
+            await ctx.send("An error occurred while executing the history command. Check bot logs for details.")
 
 async def setup(bot):
     await bot.add_cog(History(bot))
