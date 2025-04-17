@@ -5,18 +5,27 @@ import time
 class AFK(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.afk_users = {}  # {user_id: (reason, timestamp)}
+        self.afk_users = {}  # {guild_id: {user_id: (reason, timestamp)}}
 
     @commands.command()
     async def afk(self, ctx, *, reason="AFK"):
         try:
             user = ctx.author
+            guild_id = ctx.guild.id
+
+            # Initialize guild dictionary if not exists
+            if guild_id not in self.afk_users:
+                self.afk_users[guild_id] = {}
 
             # Check if turning off AFK
             if reason.lower() == "off":
-                if user.id in self.afk_users:
-                    reason, start_time = self.afk_users.pop(user.id)
+                if guild_id in self.afk_users and user.id in self.afk_users[guild_id]:
+                    reason, start_time = self.afk_users[guild_id].pop(user.id)
                     duration = int(time.time() - start_time)
+
+                    # Clean up empty guild dictionary
+                    if not self.afk_users[guild_id]:
+                        del self.afk_users[guild_id]
 
                     # Create embed using utils
                     utils = self.bot.get_cog('Utils')
@@ -29,11 +38,11 @@ class AFK(commands.Cog):
 
                     await ctx.send(embed=embed)
                 else:
-                    await ctx.send("You are not currently AFK.")
+                    await ctx.send("You are not currently AFK in this server.")
                 return
 
-            # Set AFK status
-            self.afk_users[user.id] = (reason, time.time())
+            # Set AFK status for this guild
+            self.afk_users[guild_id][user.id] = (reason, time.time())
 
             # Create embed using utils
             utils = self.bot.get_cog('Utils')
@@ -41,7 +50,7 @@ class AFK(commands.Cog):
                 await ctx.send("Error: Utils cog not loaded.")
                 return
 
-            embed = utils.create_embed(ctx, title="AFK Set")
+            embed = utils.create_embed(ctx, title="AFK")
             embed.description = f"{user.mention} | set your AFK status to: {reason}"
 
             # Send embed
@@ -55,23 +64,34 @@ class AFK(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        print(f"on_message triggered: {message.content} by {message.author}")
+        print(f"on_message triggered: {message.content} by {message.author} in guild {message.guild.id if message.guild else 'DM'}")
 
         if message.author.bot:
             print("Message from bot, skipping.")
             return
 
+        # Ignore DMs (no guild context)
+        if not message.guild:
+            print("Message in DM, skipping AFK checks.")
+            return
+
+        guild_id = message.guild.id
         user = message.author
-        # Check if the user is AFK and sent a message (remove AFK)
-        if user.id in self.afk_users:
-            print(f"User {user} is AFK, checking message: {message.content}")
+
+        # Check if the user is AFK in this guild and sent a message (remove AFK)
+        if guild_id in self.afk_users and user.id in self.afk_users[guild_id]:
+            print(f"User {user} is AFK in guild {guild_id}, checking message: {message.content}")
             # Ignore if the message is the afk command itself
             if message.content.startswith('.afk'):
                 print("Message is .afk command, skipping removal.")
             else:
-                reason, start_time = self.afk_users.pop(user.id)
+                reason, start_time = self.afk_users[guild_id].pop(user.id)
                 duration = int(time.time() - start_time)
-                print(f"Removing AFK for {user}, was away for {duration} seconds")
+                print(f"Removing AFK for {user} in guild {guild_id}, was away for {duration} seconds")
+
+                # Clean up empty guild dictionary
+                if not self.afk_users[guild_id]:
+                    del self.afk_users[guild_id]
 
                 # Create embed using utils
                 utils = self.bot.get_cog('Utils')
@@ -93,11 +113,11 @@ class AFK(commands.Cog):
                     await message.channel.send(f"Failed to send welcome back message: {str(e)}")
                     print(f"Failed to send welcome back: {str(e)}")
 
-        # Check if any mentioned users are AFK
+        # Check if any mentioned users are AFK in this guild
         for mentioned_user in message.mentions:
-            if mentioned_user.id in self.afk_users:
-                print(f"Mentioned user {mentioned_user} is AFK.")
-                reason, start_time = self.afk_users[mentioned_user.id]
+            if guild_id in self.afk_users and mentioned_user.id in self.afk_users[guild_id]:
+                print(f"Mentioned user {mentioned_user} is AFK in guild {guild_id}.")
+                reason, start_time = self.afk_users[guild_id][mentioned_user.id]
                 duration = int(time.time() - start_time)
 
                 # Create embed using utils
