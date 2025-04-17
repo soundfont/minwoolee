@@ -7,11 +7,12 @@ class History(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.mod_logs = {}  # {guild_id: {member_id: [{"action": str, "moderator": user, "timestamp": float, "reason": str}, ...]}}
+        print("DEBUG: History cog initialized, mod_logs cleared.")
 
     def log_action(self, guild_id, member_id, action, moderator, reason=None):
         # Ensure member_id is an integer
         member_id = int(member_id)
-        print(f"DEBUG: Logging action - Guild: {guild_id}, Member: {member_id}, Action: {action}")  # Debug print
+        print(f"DEBUG: Logging action - Guild: {guild_id}, Member: {member_id}, Action: {action}")
         if guild_id not in self.mod_logs:
             self.mod_logs[guild_id] = {}
         if member_id not in self.mod_logs[guild_id]:
@@ -24,7 +25,7 @@ class History(commands.Cog):
             "reason": reason
         }
         self.mod_logs[guild_id][member_id].append(action_entry)
-        print(f"DEBUG: Current mod_logs for guild {guild_id}, member {member_id}: {self.mod_logs[guild_id][member_id]}")  # Debug print
+        print(f"DEBUG: Current mod_logs for guild {guild_id}, member {member_id}: {self.mod_logs[guild_id][member_id]}")
 
     @commands.command()
     @commands.has_permissions(moderate_members=True)
@@ -39,7 +40,16 @@ class History(commands.Cog):
                 return
 
             actions = self.mod_logs[guild_id][member_id]
-            print(f"DEBUG: Actions for member {member_id} in guild {guild_id}: {actions}")  # Debug print
+            print(f"DEBUG: Actions before validation for member {member_id} in guild {guild_id}: {actions}")
+
+            # Validate actions list
+            if not all(isinstance(action, dict) for action in actions):
+                await ctx.send("Corrupted history data detected. Clearing history for this member.")
+                self.mod_logs[guild_id][member_id] = []
+                await ctx.send(f"No moderation history found for {member.mention} after clearing.")
+                return
+
+            print(f"DEBUG: Actions after validation: {actions}")
 
             # Pagination setup
             actions_per_page = 5
@@ -56,8 +66,10 @@ class History(commands.Cog):
                 start_idx = (page_num - 1) * actions_per_page
                 end_idx = start_idx + actions_per_page
                 page_actions = actions[start_idx:end_idx]
+                print(f"DEBUG: Page actions for page {page_num}: {page_actions}")
                 description = ""
                 for action in page_actions:
+                    print(f"DEBUG: Processing action: {action}")
                     if not isinstance(action, dict):
                         print(f"DEBUG: Invalid action format: {action}")
                         description += f"**Invalid Action Entry:** {action}\n\n"
@@ -71,7 +83,7 @@ class History(commands.Cog):
                     description += f"**Action:** {action['action']} | **Moderator:** {action['moderator'].mention} | **Time:** {timestamp}\n**Reason:** {reason}\n\n"
                 embed = utils.create_embed(ctx, title=f"Moderation History for {member}")
                 embed.description = description.strip()
-                print(f"DEBUG: Embed description length: {len(embed.description)}")  # Debug print
+                print(f"DEBUG: Embed description length: {len(embed.description)}")
                 if len(embed.description) > 4096:
                     embed.description = embed.description[:4000] + "... (Truncated)"
                 return embed
