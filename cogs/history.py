@@ -9,6 +9,7 @@ class History(commands.Cog):
         self.mod_logs = {}  # {guild_id: {member_id: [{"action": str, "moderator": user, "timestamp": float, "reason": str}, ...]}}
 
     def log_action(self, guild_id, member_id, action, moderator, reason=None):
+        print(f"DEBUG: Logging action - Guild: {guild_id}, Member: {member_id}, Action: {action}")  # Debug print
         if guild_id not in self.mod_logs:
             self.mod_logs[guild_id] = {}
         if member_id not in self.mod_logs[guild_id]:
@@ -21,6 +22,7 @@ class History(commands.Cog):
             "reason": reason
         }
         self.mod_logs[guild_id][member_id].append(action_entry)
+        print(f"DEBUG: Current mod_logs for guild {guild_id}, member {member_id}: {self.mod_logs[guild_id][member_id]}")  # Debug print
 
     @commands.command()
     @commands.has_permissions(moderate_members=True)
