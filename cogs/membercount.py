@@ -20,10 +20,13 @@ class MemberCount(commands.Cog):
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
-            embed.add_field(name="Humans", value=human_count, inline=True)
-            embed.add_field(name="Bots", value=bot_count, inline=True)
-            embed.add_field(name="Total", value=total_members, inline=True)
+            embed.add_field(name="👥 Humans", value=human_count, inline=True)
+            embed.add_field(name="🤖 Bots", value=bot_count, inline=True)
+            embed.add_field(name="📊 Total", value=total_members, inline=True)
             embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
+            # Set server icon as thumbnail if available
+            if guild.icon:
+                embed.set_thumbnail(url=guild.icon.url)
 
             # Send embed
             await ctx.send(embed=embed)
