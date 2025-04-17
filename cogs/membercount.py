@@ -22,9 +22,9 @@ class MemberCount(commands.Cog):
             embed = utils.create_embed(ctx, title=f"{guild.name} Member Count")
 
             # Add fields
-            embed.add_field(name="👥 Humans", value=human_count, inline=True)
-            embed.add_field(name="🤖 Bots", value=bot_count, inline=True)
-            embed.add_field(name="📊 Total", value=total_members, inline=True)
+            embed.add_field(name="Humans", value=human_count, inline=True)
+            embed.add_field(name="Bots", value=bot_count, inline=True)
+            embed.add_field(name="Total", value=total_members, inline=True)
 
             # Send embed
             await ctx.send(embed=embed)
