@@ -24,8 +24,8 @@ class AFK(commands.Cog):
                         await ctx.send("Error: Utils cog not loaded.")
                         return
 
-                    embed = utils.create_embed(ctx, title="AFK")
-                    embed.description = f"Welcome back {user.mention}, you were away for {duration} seconds"
+                    embed = utils.create_embed(ctx, title="Welcome Back")
+                    embed.description = f"{user.mention}, you were away for {duration} seconds"
 
                     await ctx.send(embed=embed)
                 else:
@@ -41,7 +41,7 @@ class AFK(commands.Cog):
                 await ctx.send("Error: Utils cog not loaded.")
                 return
 
-            embed = utils.create_embed(ctx, title="AFK")
+            embed = utils.create_embed(ctx, title="AFK Set")
             embed.description = f"{user.mention} | set your AFK status to: {reason}"
 
             # Send embed
@@ -55,40 +55,48 @@ class AFK(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
+        print(f"on_message triggered: {message.content} by {message.author}")
+
         if message.author.bot:
+            print("Message from bot, skipping.")
             return
 
         user = message.author
         # Check if the user is AFK and sent a message (remove AFK)
         if user.id in self.afk_users:
+            print(f"User {user} is AFK, checking message: {message.content}")
             # Ignore if the message is the afk command itself
             if message.content.startswith('.afk'):
-                return
+                print("Message is .afk command, skipping removal.")
+            else:
+                reason, start_time = self.afk_users.pop(user.id)
+                duration = int(time.time() - start_time)
+                print(f"Removing AFK for {user}, was away for {duration} seconds")
 
-            reason, start_time = self.afk_users.pop(user.id)
-            duration = int(time.time() - start_time)
+                # Create embed using utils
+                utils = self.bot.get_cog('Utils')
+                if not utils:
+                    await message.channel.send("Error: Utils cog not loaded.")
+                    return
 
-            # Create embed using utils
-            utils = self.bot.get_cog('Utils')
-            if not utils:
-                await message.channel.send("Error: Utils cog not loaded.")
-                return
+                embed = utils.create_embed(message, title="Welcome Back")
+                embed.description = f"{user.mention}, you were away for {duration} seconds"
 
-            embed = utils.create_embed(message, title="Welcome Back")
-            embed.description = f"{user.mention}, you were away for {duration} seconds"
-
-            # Send welcome back embed
-            try:
-                await message.channel.send(embed=embed)
-            except discord.Forbidden:
-                await message.channel.send("I don't have permission to send embeds in this channel.")
-            except discord.HTTPException as e:
-                await message.channel.send(f"Failed to send welcome back message: {str(e)}")
-            return
+                # Send welcome back embed
+                try:
+                    await message.channel.send(embed=embed)
+                    print("Welcome back message sent.")
+                except discord.Forbidden:
+                    await message.channel.send("I don't have permission to send embeds in this channel.")
+                    print("Failed to send welcome back: missing permissions.")
+                except discord.HTTPException as e:
+                    await message.channel.send(f"Failed to send welcome back message: {str(e)}")
+                    print(f"Failed to send welcome back: {str(e)}")
 
         # Check if any mentioned users are AFK
         for mentioned_user in message.mentions:
             if mentioned_user.id in self.afk_users:
+                print(f"Mentioned user {mentioned_user} is AFK.")
                 reason, start_time = self.afk_users[mentioned_user.id]
                 duration = int(time.time() - start_time)
 
@@ -104,10 +112,13 @@ class AFK(commands.Cog):
                 # Send AFK notification embed
                 try:
                     await message.channel.send(embed=embed)
+                    print("AFK notification sent.")
                 except discord.Forbidden:
                     await message.channel.send("I don't have permission to send embeds in this channel.")
+                    print("Failed to send AFK notification: missing permissions.")
                 except discord.HTTPException as e:
                     await message.channel.send(f"Failed to send AFK notification: {str(e)}")
+                    print(f"Failed to send AFK notification: {str(e)}")
 
 async def setup(bot):
     await bot.add_cog(AFK(bot))
