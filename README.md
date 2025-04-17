@@ -17,14 +17,11 @@
 
 ## Command Reference
 
-Each command follows this structure:
-
-Command: <name> 
-Alias: <alias if applicable> 
-Description: <what the command does> 
-Usage: <syntax> 
-Permissions: <required Discord permissions>
-
+**Command**: `<name>`  
+**Alias**: `<alias if applicable>`  
+**Description**: `<what the command does>`  
+**Usage**: `<syntax>`  
+**Permissions**: `<required Discord permissions>`
 
 ---
 
