@@ -24,8 +24,8 @@ class AFK(commands.Cog):
                         await ctx.send("Error: Utils cog not loaded.")
                         return
 
-                    embed = utils.create_embed(ctx, title="Welcome Back")
-                    embed.description = f"{user.mention}, you were away for {duration} seconds"
+                    embed = utils.create_embed(ctx, title="AFK")
+                    embed.description = f"Welcome back {user.mention}, you were away for {duration} seconds"
 
                     await ctx.send(embed=embed)
                 else:
