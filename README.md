@@ -1,17 +1,20 @@
-minwoolee is a private Discord bot designed for server moderation and utility tasks. It provides commands for managing messages, moderating members, and displaying server statistics, with a clean embed format featuring the server icon.
+minwoolee is a private Discord bot designed for server moderation and utility tasks.It provides commands for managing messages, moderating members, and displaying server statistics,with a clean embed format featuring the server icon.
 Features
 
 Command Prefix: .
+Moderation: Purge messages, kick, ban, or timeout members.
+Utility: Display human, bot, and total member counts in an embed.
+Custom Embeds: All embeds include the server icon as a thumbnail (if available).
 
 Commands
 
 
 
-Command
-Alias
-Description
-Usage
-Required Permissions
+Command  
+Alias  
+Description  
+Usage  
+Required Permissions  
 
 
 
@@ -45,29 +48,13 @@ Ban Members
 
 timeout
 to
-Times out a member for a specified duration (in minutes, max 28 days).
+Times out a member for a specified duration (max 28 days).
 .timeout <@user> <minutes> [reason]
 Moderate Members
 
 
 membercount
 mc
-Displays human, bot, and total member counts in an embed with server icon thumbnail.
+Displays human, bot, and total member counts in an embed.
 .membercount
 None (Embed Links for bot)
-
-
-Troubleshooting
-
-Commands not responding:
-Ensure the bot has View Channels, Send Messages, and Embed Links permissions in the channel (Channel Settings > Permissions).
-For .kick, .ban, or .timeout, verify the bot’s role has Kick Members, Ban Members, or Moderate Members permissions and is above the target member’s role (Server Settings > Roles).
-Check Heroku logs for errors: heroku logs --tail --app your-app-name.
-
-
-Moderation commands failing:
-Reinvite the bot with required permissions (Kick Members, Ban Members, Moderate Members) via the Discord Developer Portal.
-Ensure Message Content Intent is enabled in the Developer Portal (Bot > Privileged Gateway Intents).
-
-
-
