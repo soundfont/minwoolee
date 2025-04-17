@@ -7,7 +7,7 @@ Utility: Display human, bot, and total member counts in an embed.
 Custom Embeds: All embeds include the server icon as a thumbnail (if available).
 
 Commands
-
+-
 
 Formatting
 -
