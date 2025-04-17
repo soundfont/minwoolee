@@ -41,8 +41,8 @@ class AFK(commands.Cog):
                 await ctx.send("Error: Utils cog not loaded.")
                 return
 
-            embed = utils.create_embed(ctx, title="AFK Set")
-            embed.description = f"{user.mention} I set your AFK: {reason}"
+            embed = utils.create_embed(ctx, title="AFK")
+            embed.description = f"{user.mention} | Set your AFK status to: {reason}"
 
             # Send embed
             await ctx.send(embed=embed)
@@ -74,8 +74,8 @@ class AFK(commands.Cog):
                 await message.channel.send("Error: Utils cog not loaded.")
                 return
 
-            embed = utils.create_embed(message, title="Welcome Back")
-            embed.description = f"{user.mention}, you were away for {duration} seconds"
+            embed = utils.create_embed(message)
+            embed.description = f"Welcome back {user.mention}, you were away for {duration} seconds"
 
             # Send welcome back embed
             try:
