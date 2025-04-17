@@ -29,7 +29,7 @@ async def on_ready():
 
 # Run bot using Heroku config var
 async def main():
-    token = os.getenv('DISCORD_TOKEN')
+    token = os.getenv('DISCORD_BOT_TOKEN')
     if not token:
         raise ValueError("DISCORD_TOKEN environment variable not set")
     await bot.start(token)
