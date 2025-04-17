@@ -17,6 +17,11 @@ class Untimeout(commands.Cog):
             # Remove the timeout
             await member.timeout(None, reason=reason)
 
+            # Log the action
+            history = self.bot.get_cog('History')
+            if history:
+                history.log_action(ctx.guild.id, member.id, "Timeout Removed", ctx.author, reason)
+
             # Create embed using utils
             utils = self.bot.get_cog('Utils')
             if not utils:
