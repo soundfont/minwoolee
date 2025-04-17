@@ -4,10 +4,10 @@ import os
 import asyncio
 import traceback
 
-# Initialize bot with . prefix and intents
+# Initialize bot with . prefix, intents, and no default help command
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix='.', intents=intents)
+bot = commands.Bot(command_prefix='.', intents=intents, help_command=None)
 
 # Load cogs
 async def load_cogs():
@@ -29,7 +29,7 @@ async def on_ready():
 
 # Run bot using Heroku config var
 async def main():
-    token = os.getenv('DISCORD_BOT_TOKEN')
+    token = os.getenv('DISCORD_TOKEN')
     if not token:
         raise ValueError("DISCORD_TOKEN environment variable not set")
     await bot.start(token)
