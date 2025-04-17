@@ -9,6 +9,8 @@ class History(commands.Cog):
         self.mod_logs = {}  # {guild_id: {member_id: [{"action": str, "moderator": user, "timestamp": float, "reason": str}, ...]}}
 
     def log_action(self, guild_id, member_id, action, moderator, reason=None):
+        # Ensure member_id is an integer
+        member_id = int(member_id)
         print(f"DEBUG: Logging action - Guild: {guild_id}, Member: {member_id}, Action: {action}")  # Debug print
         if guild_id not in self.mod_logs:
             self.mod_logs[guild_id] = {}
@@ -37,6 +39,7 @@ class History(commands.Cog):
                 return
 
             actions = self.mod_logs[guild_id][member_id]
+            print(f"DEBUG: Actions for member {member_id} in guild {guild_id}: {actions}")  # Debug print
 
             # Pagination setup
             actions_per_page = 5
@@ -55,6 +58,10 @@ class History(commands.Cog):
                 page_actions = actions[start_idx:end_idx]
                 description = ""
                 for action in page_actions:
+                    if not isinstance(action, dict):
+                        print(f"DEBUG: Invalid action format: {action}")
+                        description += f"**Invalid Action Entry:** {action}\n\n"
+                        continue
                     try:
                         timestamp = discord.utils.format_dt(int(action["timestamp"]), style="R")
                     except (TypeError, ValueError) as e:
