@@ -6,12 +6,11 @@ Moderation: Purge messages, kick, ban, or timeout members.
 Utility: Display human, bot, and total member counts in an embed.
 Custom Embeds: All embeds include the server icon as a thumbnail (if available).
 
-Commands
--
-
 Formatting
 -
-Command  
+
+Command
+-
 Alias  
 Description  
 Usage  
@@ -21,7 +20,6 @@ Required Permissions
 
 ping
 -
-N/A  
 Shows the bot's latency in milliseconds.  
 .ping  
 None
@@ -29,7 +27,6 @@ None
 
 purge
 -
-N/A  
 Deletes a specified number of messages (1–100).  
 .purge <amount>  
 Manage Messages  
@@ -37,7 +34,6 @@ Manage Messages
 
 kick
 -
-N/A  
 Kicks a member from the server.  
 .kick <@user> [reason]  
 Kick Members  
@@ -45,14 +41,12 @@ Kick Members
 
 ban
 -
-N/A  
 Bans a member from the server.  
 .ban <@user> [reason]  
 Ban Members  
 
 
 timeout
--
 to  
 Times out a member for a specified duration (max 28 days).  
 .timeout <@user> <minutes> [reason]  
@@ -60,8 +54,7 @@ Moderate Members
 
 
 membercount
--
 mc  
-Displays human, bot, and total member counts in an embed.  
+Displays human, bot, and total member counts in the server.
 .membercount  
 None (Embed Links for bot)  
