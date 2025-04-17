@@ -47,6 +47,7 @@ Ban Members
 
 
 timeout
+-
 to  
 Times out a member for a specified duration (max 28 days).  
 .timeout <@user> <minutes> [reason]  
@@ -54,7 +55,8 @@ Moderate Members
 
 
 membercount
+-
 mc  
 Displays human, bot, and total member counts in the server.
 .membercount  
-None (Embed Links for bot)  
+None
