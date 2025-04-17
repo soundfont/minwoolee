@@ -14,19 +14,17 @@ class MemberCount(commands.Cog):
             bot_count = sum(1 for member in guild.members if member.bot)
             human_count = total_members - bot_count
 
-            # Create embed
-            embed = discord.Embed(
-                title=f"{guild.name} Member Count",
-                color=discord.Color.blue(),
-                timestamp=discord.utils.utcnow()
-            )
+            # Create embed using utils
+            utils = self.bot.get_cog('Utils')
+            if not utils:
+                await ctx.send("Error: Utils cog not loaded.")
+                return
+            embed = utils.create_embed(ctx, title=f"{guild.name} Member Count")
+
+            # Add fields
             embed.add_field(name="👥 Humans", value=human_count, inline=True)
             embed.add_field(name="🤖 Bots", value=bot_count, inline=True)
             embed.add_field(name="📊 Total", value=total_members, inline=True)
-            embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
-            # Set server icon as thumbnail if available
-            if guild.icon:
-                embed.set_thumbnail(url=guild.icon.url)
 
             # Send embed
             await ctx.send(embed=embed)
