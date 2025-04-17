@@ -9,10 +9,29 @@ class Kick(commands.Cog):
     @commands.has_permissions(kick_members=True)
     async def kick(self, ctx, member: discord.Member, *, reason=None):
         try:
+            # Kick the member
             await member.kick(reason=reason)
-            await ctx.send(f"Kicked {member.mention} for: {reason or 'No reason provided'}")
+
+            # Log the action
+            history = self.bot.get_cog('History')
+            if history:
+                history.log_action(ctx.guild.id, member.id, "Kicked", ctx.author, reason)
+
+            # Create embed using utils
+            utils = self.bot.get_cog('Utils')
+            if not utils:
+                await ctx.send("Error: Utils cog not loaded.")
+                return
+
+            embed = utils.create_embed(ctx, title="Member Kicked")
+            embed.description = f"Kicked {member.mention}"
+            if reason:
+                embed.description += f"\n**Reason:** {reason}"
+
+            await ctx.send(embed=embed)
+
         except discord.Forbidden:
-            await ctx.send("I don't have permission to kick this member.")
+            await ctx.send("I don't have permission to kick members (requires 'Kick Members').")
         except discord.HTTPException as e:
             await ctx.send(f"Failed to kick: {str(e)}")
 
@@ -20,10 +39,10 @@ class Kick(commands.Cog):
     async def kick_error(self, ctx, error):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("You need 'Kick Members' permission to use this command.")
-        elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send("Please specify a member to kick (e.g., .kick @user reason).")
-        elif isinstance(error, commands.BadArgument):
-            await ctx.send("Invalid member specified. Use .kick @user [reason].")
+        elif isinstance(error, commands.MemberNotFound):
+            await ctx.send("Member not found. Please provide a valid member (mention or ID).")
+        elif isinstance(error, commands.CommandInvokeError):
+            await ctx.send("An error occurred while executing the kick command.")
 
 async def setup(bot):
     await bot.add_cog(Kick(bot))
