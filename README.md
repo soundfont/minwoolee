@@ -20,41 +20,41 @@ Required Permissions
 
 ping
 -
-Shows the bot's latency in milliseconds.
-.ping
+Shows the bot's latency in milliseconds.  
+.ping  
 None
 
 
 purge
 -
-Deletes a specified number of messages (1–100).
-.purge <amount>
-Manage Messages
+Deletes a specified number of messages (1–100).  
+.purge <amount>  
+Manage Messages  
 
 
 kick
 -
-Kicks a member from the server.
-.kick <@user> [reason]
-Kick Members
+Kicks a member from the server.  
+.kick <@user> [reason]  
+Kick Members  
 
 
 ban
 -
-Bans a member from the server.
-.ban <@user> [reason]
-Ban Members
+Bans a member from the server.  
+.ban <@user> [reason]  
+Ban Members  
 
 
 timeout
-to
-Times out a member for a specified duration (max 28 days).
-.timeout <@user> <minutes> [reason]
-Moderate Members
+to  
+Times out a member for a specified duration (max 28 days).  
+.timeout <@user> <minutes> [reason]  
+Moderate Members  
 
 
 membercount
-mc
-Displays human, bot, and total member counts in an embed.
-.membercount
-None (Embed Links for bot)
+mc  
+Displays human, bot, and total member counts in an embed.  
+.membercount  
+None (Embed Links for bot)  
