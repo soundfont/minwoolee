@@ -24,11 +24,15 @@ class Timeout(commands.Cog):
             # Apply the timeout
             duration = timedelta(minutes=minutes)
             await member.timeout(duration, reason=reason)
+            await ctx.send("DEBUG: Timeout action completed.")  # Debug message
 
             # Log the action
             history = self.bot.get_cog('History')
             if history:
+                await ctx.send("DEBUG: History cog found, logging action.")  # Debug message
                 history.log_action(ctx.guild.id, member.id, f"Timed Out ({minutes} minutes)", ctx.author, reason)
+            else:
+                await ctx.send("DEBUG: History cog not found, skipping logging.")  # Debug message
 
             # Create embed using utils
             utils = self.bot.get_cog('Utils')
