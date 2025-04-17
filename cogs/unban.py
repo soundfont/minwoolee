@@ -23,6 +23,11 @@ class Unban(commands.Cog):
             # Unban the user
             await ctx.guild.unban(user, reason=reason)
 
+            # Log the action
+            history = self.bot.get_cog('History')
+            if history:
+                history.log_action(ctx.guild.id, user.id, "Unbanned", ctx.author, reason)
+
             # Create embed using utils
             utils = self.bot.get_cog('Utils')
             if not utils:
@@ -34,7 +39,6 @@ class Unban(commands.Cog):
             if reason:
                 embed.description += f"\n**Reason:** {reason}"
 
-            # Send embed
             await ctx.send(embed=embed)
 
         except discord.Forbidden:
