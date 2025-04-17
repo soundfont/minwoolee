@@ -19,7 +19,7 @@ class MemberCount(commands.Cog):
             if not utils:
                 await ctx.send("Error: Utils cog not loaded.")
                 return
-            embed = utils.create_embed(ctx, title=f"{guild.name} Member Count")
+            embed = utils.create_embed(ctx, title=f"{guild.name} statistics")
 
             # Add fields
             embed.add_field(name="Humans", value=human_count, inline=True)
@@ -31,14 +31,14 @@ class MemberCount(commands.Cog):
         except discord.Forbidden:
             await ctx.send("I don't have permission to send embeds in this channel.")
         except discord.HTTPException as e:
-            await ctx.send(f"Failed to send member count: {str(e)}")
+            await ctx.send(f"Failed to send statistics: {str(e)}")
 
     @membercount.error
     async def membercount_error(self, ctx, error):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("You need 'Send Messages' permission to use this command.")
         elif isinstance(error, commands.CommandInvokeError):
-            await ctx.send("An error occurred while fetching the member count.")
+            await ctx.send("An error occurred while fetching the statistics.")
 
 async def setup(bot):
     await bot.add_cog(MemberCount(bot))
