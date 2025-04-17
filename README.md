@@ -57,6 +57,6 @@ Moderate Members
 membercount
 -
 mc  
-Displays human, bot, and total member counts in the server.
+Displays human, bot, and total member counts in the server.  
 .membercount  
 None
