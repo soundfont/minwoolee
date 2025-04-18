@@ -77,3 +77,12 @@
 
 Stay tuned! More moderation and utility commands are in development. This README will be updated accordingly.
 
+## Authors
+
+Developed and maintained by:
+
+- [**soundfont**](https://github.com/soundfont)  
+- [**Rafan Ahmed**](https://github.com/RafanAhmed)
+
+
+
