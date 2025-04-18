@@ -40,28 +40,27 @@ class History(commands.Cog):
                 return
 
             actions = self.mod_logs[guild_id][member_id]
-            print(f"DEBUG: Actions before validation for member {member_id} in guild {guild_id}: {actions}")
+            print(f"DEBUG: Actions for member {member_id} in guild {guild_id}: {actions}")
 
-            # Explicitly validate actions list
-            valid_actions = True
-            for action in actions:
-                if not isinstance(action, dict):
-                    print(f"DEBUG: Found invalid action: {action}")
-                    valid_actions = False
-                    break
-            print(f"DEBUG: Actions validation result: {'Valid' if valid_actions else 'Invalid'}")
+            # Filter valid actions (must be dict with required keys)
+            valid_actions = [
+                action for action in actions
+                if isinstance(action, dict) and all(key in action for key in ["action", "moderator", "timestamp", "reason"])
+            ]
+            invalid_actions = [action for action in actions if action not in valid_actions]
+            if invalid_actions:
+                print(f"DEBUG: Invalid actions found: {invalid_actions}")
+                await ctx.send("Corrupted history data detected. Clearing invalid entries.")
+                self.mod_logs[guild_id][member_id] = valid_actions
+                if not valid_actions:
+                    await ctx.send(f"No valid moderation history found for {member.mention} after clearing.")
+                    return
 
-            if not valid_actions:
-                await ctx.send("Corrupted history data detected. Clearing history for this member.")
-                self.mod_logs[guild_id][member_id] = []
-                await ctx.send(f"No moderation history found for {member.mention} after clearing.")
-                return
-
-            print(f"DEBUG: Actions after validation: {actions}")
+            print(f"DEBUG: Valid actions after filtering: {valid_actions}")
 
             # Pagination setup
             actions_per_page = 5
-            total_pages = math.ceil(len(actions) / actions_per_page)
+            total_pages = math.ceil(len(valid_actions) / actions_per_page)
             current_page = 1
 
             # Create embed using utils
@@ -73,14 +72,14 @@ class History(commands.Cog):
             def get_page(page_num):
                 start_idx = (page_num - 1) * actions_per_page
                 end_idx = start_idx + actions_per_page
-                page_actions = actions[start_idx:end_idx]
+                page_actions = valid_actions[start_idx:end_idx]
                 print(f"DEBUG: Page actions for page {page_num}: {page_actions}")
                 description = ""
                 for action in page_actions:
                     print(f"DEBUG: Processing action: {action}")
+                    # Double-check action is a dict
                     if not isinstance(action, dict):
-                        print(f"DEBUG: Invalid action format in get_page: {action}")
-                        description += f"**Invalid Action Entry:** {action}\n\n"
+                        print(f"DEBUG: Unexpected invalid action in get_page: {action}")
                         continue
                     try:
                         timestamp = discord.utils.format_dt(int(action["timestamp"]), style="R")
@@ -90,7 +89,7 @@ class History(commands.Cog):
                     reason = action["reason"] if action["reason"] else "No reason provided"
                     description += f"**Action:** {action['action']} | **Moderator:** {action['moderator'].mention} | **Time:** {timestamp}\n**Reason:** {reason}\n\n"
                 embed = utils.create_embed(ctx, title=f"Moderation History for {member}")
-                embed.description = description.strip()
+                embed.description = description.strip() or "No actions to display."
                 print(f"DEBUG: Embed description length: {len(embed.description)}")
                 if len(embed.description) > 4096:
                     embed.description = embed.description[:4000] + "... (Truncated)"
@@ -143,6 +142,18 @@ class History(commands.Cog):
         except Exception as e:
             await ctx.send(f"Unexpected error during history command: {str(e)}")
             raise e  # Re-raise for Heroku logs
+
+    @commands.command()
+    @commands.has_permissions(administrator=True)
+    async def clearhistory(self, ctx):
+        """Clears all moderation history."""
+        try:
+            self.mod_logs.clear()
+            await ctx.send("All moderation history has been cleared.")
+            print("DEBUG: All mod_logs cleared via clearhistory command.")
+        except Exception as e:
+            await ctx.send(f"Failed to clear history: {str(e)}")
+            print(f"DEBUG: Error clearing mod_logs: {str(e)}")
 
     @history.error
     async def history_error(self, ctx, error):
