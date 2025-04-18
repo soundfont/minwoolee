@@ -42,8 +42,16 @@ class History(commands.Cog):
             actions = self.mod_logs[guild_id][member_id]
             print(f"DEBUG: Actions before validation for member {member_id} in guild {guild_id}: {actions}")
 
-            # Validate actions list
-            if not all(isinstance(action, dict) for action in actions):
+            # Explicitly validate actions list
+            valid_actions = True
+            for action in actions:
+                if not isinstance(action, dict):
+                    print(f"DEBUG: Found invalid action: {action}")
+                    valid_actions = False
+                    break
+            print(f"DEBUG: Actions validation result: {'Valid' if valid_actions else 'Invalid'}")
+
+            if not valid_actions:
                 await ctx.send("Corrupted history data detected. Clearing history for this member.")
                 self.mod_logs[guild_id][member_id] = []
                 await ctx.send(f"No moderation history found for {member.mention} after clearing.")
@@ -71,7 +79,7 @@ class History(commands.Cog):
                 for action in page_actions:
                     print(f"DEBUG: Processing action: {action}")
                     if not isinstance(action, dict):
-                        print(f"DEBUG: Invalid action format: {action}")
+                        print(f"DEBUG: Invalid action format in get_page: {action}")
                         description += f"**Invalid Action Entry:** {action}\n\n"
                         continue
                     try:
