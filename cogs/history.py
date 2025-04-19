@@ -24,7 +24,7 @@ class History(commands.Cog):
             "reason": reason
         }
         self.mod_logs[guild_id][member_id].append(action_entry)
-        print(f"DEBUG: Current mod_logs for guild {guild_id}, member {member_id}: {self.mod_logs[guild_id][member_id]}")
+        print(f"DEBUG: Current mod_logs for guild {guild_id}, member {member_id} (length: {len(self.mod_logs[guild_id][member_id])}): {self.mod_logs[guild_id][member_id]}")
 
     @commands.command()
     @commands.has_permissions(moderate_members=True)
@@ -38,7 +38,9 @@ class History(commands.Cog):
                 return
 
             actions = self.mod_logs[guild_id][member_id]
-            print(f"DEBUG: Raw actions for member {member_id} in guild {guild_id}: {actions}")
+            print(f"DEBUG: Raw actions for member {member_id} in guild {guild_id} (length: {len(actions)}): {actions}")
+            # Log types of each action
+            print(f"DEBUG: Action types: {[type(action).__name__ for action in actions]}")
 
             # Filter valid actions with stricter checks
             valid_actions = []
@@ -57,7 +59,14 @@ class History(commands.Cog):
                     await ctx.send(f"No valid moderation history found for {member.mention}.")
                     return
 
-            print(f"DEBUG: Valid actions after filtering: {valid_actions}")
+            print(f"DEBUG: Valid actions after filtering (length: {len(valid_actions)}): {valid_actions}")
+            print(f"DEBUG: Valid action types: {[type(action).__name__ for action in valid_actions]}")
+
+            # Double-check valid_actions before proceeding
+            for idx, action in enumerate(valid_actions):
+                if not isinstance(action, dict):
+                    print(f"DEBUG: Unexpected invalid action in valid_actions at index {idx}: {action}")
+                    valid_actions = [a for a in valid_actions if isinstance(a, dict)]
 
             # Pagination setup
             actions_per_page = 5
@@ -73,12 +82,13 @@ class History(commands.Cog):
                 start_idx = (page_num - 1) * actions_per_page
                 end_idx = start_idx + actions_per_page
                 page_actions = valid_actions[start_idx:end_idx]
-                print(f"DEBUG: Page actions for page {page_num}: {page_actions}")
+                print(f"DEBUG: Page actions for page {page_num} (length: {len(page_actions)}): {page_actions}")
+                print(f"DEBUG: Page action types: {[type(action).__name__ for action in page_actions]}")
                 description = ""
-                for action in page_actions:
-                    print(f"DEBUG: Processing action: {action}")
+                for idx, action in enumerate(page_actions):
+                    print(f"DEBUG: Processing action at index {idx}: {action}")
                     if not isinstance(action, dict):
-                        print(f"DEBUG: Unexpected invalid action in get_page: {action}")
+                        print(f"DEBUG: Skipping invalid action in get_page at index {idx}: {action}")
                         continue
                     try:
                         timestamp = discord.utils.format_dt(int(action["timestamp"]), style="R")
