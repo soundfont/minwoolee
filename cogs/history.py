@@ -38,21 +38,26 @@ class History(commands.Cog):
                 return
 
             actions = self.mod_logs[guild_id][member_id]
-            print(f"DEBUG: Actions for member {member_id} in guild {guild_id}: {actions}")
+            print(f"DEBUG: Raw actions for member {member_id} in guild {guild_id}: {actions}")
 
-            # Filter valid actions
-            valid_actions = [
-                action for action in actions
-                if isinstance(action, dict) and all(key in action for key in ["action", "moderator", "timestamp"])
-            ]
-            invalid_actions = [action for action in actions if action not in valid_actions]
+            # Filter valid actions with stricter checks
+            valid_actions = []
+            invalid_actions = []
+            for action in actions:
+                if isinstance(action, dict) and all(key in action for key in ["action", "moderator", "timestamp"]) and isinstance(action["timestamp"], (int, float)):
+                    valid_actions.append(action)
+                else:
+                    invalid_actions.append(action)
+
             if invalid_actions:
-                print(f"DEBUG: Invalid actions found: {invalid_actions}")
+                print(f"DEBUG: Invalid actions found and will be removed: {invalid_actions}")
                 self.mod_logs[guild_id][member_id] = valid_actions
                 await ctx.send("Removed invalid history entries.")
                 if not valid_actions:
                     await ctx.send(f"No valid moderation history found for {member.mention}.")
                     return
+
+            print(f"DEBUG: Valid actions after filtering: {valid_actions}")
 
             # Pagination setup
             actions_per_page = 5
@@ -72,6 +77,9 @@ class History(commands.Cog):
                 description = ""
                 for action in page_actions:
                     print(f"DEBUG: Processing action: {action}")
+                    if not isinstance(action, dict):
+                        print(f"DEBUG: Unexpected invalid action in get_page: {action}")
+                        continue
                     try:
                         timestamp = discord.utils.format_dt(int(action["timestamp"]), style="R")
                     except (TypeError, ValueError) as e:
