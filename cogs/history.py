@@ -13,35 +13,31 @@ class History(commands.Cog):
         self.db_url = os.getenv("DATABASE_URL")
         if not self.db_url:
             raise ValueError("DATABASE_URL environment variable not set")
-        # Heroku Postgres requires SSL
         self.db_params = self._parse_db_url(self.db_url)
         self._init_db()
         print("DEBUG: History cog initialized, Postgres database set up.")
 
     def _parse_db_url(self, url):
-        """Parse the Heroku DATABASE_URL into psycopg2 connection parameters."""
         parsed = urlparse(url)
         return {
-            "dbname": parsed.path[1:],  # Remove leading '/'
+            "dbname": parsed.path[1:],
             "user": parsed.username,
             "password": parsed.password,
             "host": parsed.hostname,
             "port": parsed.port,
-            "sslmode": "require"  # Heroku Postgres requires SSL
+            "sslmode": "require"
         }
 
     def _init_db(self):
-        """Initialize the Postgres database and create the mod_logs table if it doesn't exist."""
         conn = psycopg2.connect(**self.db_params)
         cursor = conn.cursor()
-        # Create table: id (auto-increment), guild_id, member_id, action, moderator (JSONB), timestamp, reason
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS mod_logs (
                 id SERIAL PRIMARY KEY,
                 guild_id BIGINT NOT NULL,
                 member_id BIGINT NOT NULL,
                 action TEXT NOT NULL,
-                moderator JSONB NOT NULL,  -- Store as JSONB
+                moderator JSONB NOT NULL,
                 timestamp DOUBLE PRECISION NOT NULL,
                 reason TEXT
             )
@@ -52,10 +48,8 @@ class History(commands.Cog):
         print("DEBUG: mod_logs table created or already exists in Postgres.")
 
     def log_action(self, guild_id, member_id, action, moderator, reason=None):
-        """Log a moderation action to the Postgres database."""
         member_id = int(member_id)
         guild_id = int(guild_id)
-        # Serialize moderator (discord.Member object) to JSON
         moderator_data = {
             "id": moderator.id,
             "name": moderator.name,
@@ -79,7 +73,6 @@ class History(commands.Cog):
         print(f"DEBUG: Action logged to Postgres: {action} for member {member_id} in guild {guild_id}")
 
     def _fetch_actions(self, guild_id, member_id):
-        """Fetch all actions for a member in a guild from the Postgres database."""
         conn = psycopg2.connect(**self.db_params)
         cursor = conn.cursor()
         cursor.execute("""
@@ -92,13 +85,12 @@ class History(commands.Cog):
         cursor.close()
         conn.close()
         
-        # Convert rows to action dictionaries
         actions = []
-        for row in rows:
+        for idx, row in enumerate(rows):
             action, moderator_json, timestamp, reason = row
+            print(f"DEBUG: Processing row {idx}: action={action}, timestamp={timestamp}, type(timestamp)={type(timestamp).__name__}")
             try:
-                moderator_data = moderator_json  # Already a dict since Postgres JSONB returns a Python dict
-                # Reconstruct a pseudo-moderator object
+                moderator_data = moderator_json
                 moderator = type('PseudoMember', (), {
                     'id': moderator_data['id'],
                     'name': moderator_data['name'],
@@ -111,10 +103,11 @@ class History(commands.Cog):
                     "reason": reason
                 })
             except (TypeError, KeyError) as e:
-                print(f"DEBUG: Failed to process moderator data: {moderator_json}, error: {str(e)}")
+                print(f"DEBUG: Failed to process moderator data at row {idx}: {moderator_json}, error: {str(e)}")
                 continue
         
         print(f"DEBUG: Fetched actions for member {member_id} in guild {guild_id} (length: {len(actions)}): {actions}")
+        print(f"DEBUG: Fetched action types: {[type(action).__name__ for action in actions]}")
         return actions
 
     @commands.command()
@@ -124,14 +117,12 @@ class History(commands.Cog):
             guild_id = ctx.guild.id
             member_id = member.id
 
-            # Fetch actions from the database
             actions = self._fetch_actions(guild_id, member_id)
             
             if not actions:
                 await ctx.send(f"No moderation history found for {member.mention}.")
                 return
 
-            # Pagination setup
             actions_per_page = 5
             total_pages = math.ceil(len(actions) / actions_per_page)
             current_page = 1
@@ -146,30 +137,34 @@ class History(commands.Cog):
                 end_idx = start_idx + actions_per_page
                 page_actions = actions[start_idx:end_idx]
                 print(f"DEBUG: Page actions for page {page_num} (length: {len(page_actions)}): {page_actions}")
+                print(f"DEBUG: Page action types: {[type(action).__name__ for action in page_actions]}")
                 description = ""
                 for idx, action in enumerate(page_actions):
-                    print(f"DEBUG: Processing action at index {idx}: {action}")
+                    print(f"DEBUG: Processing action at index {idx}: {action}, type: {type(action).__name__}")
+                    if not isinstance(action, dict):
+                        print(f"DEBUG: Skipping invalid action at index {idx}: {action}")
+                        continue
                     try:
-                        timestamp = discord.utils.format_dt(int(action["timestamp"]), style="R")
+                        timestamp = action["timestamp"]
+                        print(f"DEBUG: Timestamp for action at index {idx}: {timestamp}, type: {type(timestamp).__name__}")
+                        formatted_timestamp = discord.utils.format_dt(int(timestamp), style="R")
                     except (TypeError, ValueError) as e:
-                        timestamp = "Invalid timestamp"
-                        print(f"DEBUG: Invalid timestamp in action: {action}, error: {str(e)}")
+                        formatted_timestamp = "Invalid timestamp"
+                        print(f"DEBUG: Invalid timestamp in action at index {idx}: {action}, error: {str(e)}")
                     reason = action["reason"] if action["reason"] else "No reason provided"
-                    description += f"**Action:** {action['action']} | **Moderator:** {action['moderator'].mention} | **Time:** {timestamp}\n**Reason:** {reason}\n\n"
+                    description += f"**Action:** {action['action']} | **Moderator:** {action['moderator'].mention} | **Time:** {formatted_timestamp}\n**Reason:** {reason}\n\n"
                 embed = utils.create_embed(ctx, title=f"Moderation History for {member}")
                 embed.description = description.strip() or "No actions to display."
                 embed.set_footer(text=f"Page {page_num}/{total_pages} | Requested by {ctx.author}")
                 print(f"DEBUG: Embed description length: {len(embed.description)}")
                 return embed
 
-            # Send initial embed
             embed = get_page(current_page)
             message = await ctx.send(embed=embed)
 
             if total_pages == 1:
                 return
 
-            # Add pagination reactions
             left_arrow = "⬅️"
             right_arrow = "➡️"
             await message.add_reaction(left_arrow)
@@ -203,7 +198,6 @@ class History(commands.Cog):
     @commands.command()
     @commands.has_permissions(administrator=True)
     async def clearhistory(self, ctx):
-        """Clear all moderation history from the Postgres database."""
         try:
             conn = psycopg2.connect(**self.db_params)
             cursor = conn.cursor()
