@@ -1,30 +1,121 @@
+import os
+import psycopg2
 from discord.ext import commands
 import discord
 import time
 import math
+import json
+from urllib.parse import urlparse
 
 class History(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.mod_logs = {}  # {guild_id: {member_id: [{"action": str, "moderator": user, "timestamp": float, "reason": str}, ...]}}
-        print("DEBUG: History cog initialized, mod_logs cleared.")
+        self.db_url = os.getenv("DATABASE_URL")
+        if not self.db_url:
+            raise ValueError("DATABASE_URL environment variable not set")
+        # Heroku Postgres requires SSL
+        self.db_params = self._parse_db_url(self.db_url)
+        self._init_db()
+        print("DEBUG: History cog initialized, Postgres database set up.")
+
+    def _parse_db_url(self, url):
+        """Parse the Heroku DATABASE_URL into psycopg2 connection parameters."""
+        parsed = urlparse(url)
+        return {
+            "dbname": parsed.path[1:],  # Remove leading '/'
+            "user": parsed.username,
+            "password": parsed.password,
+            "host": parsed.hostname,
+            "port": parsed.port,
+            "sslmode": "require"  # Heroku Postgres requires SSL
+        }
+
+    def _init_db(self):
+        """Initialize the Postgres database and create the mod_logs table if it doesn't exist."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        # Create table: id (auto-increment), guild_id, member_id, action, moderator (JSONB), timestamp, reason
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS mod_logs (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                member_id BIGINT NOT NULL,
+                action TEXT NOT NULL,
+                moderator JSONB NOT NULL,  -- Store as JSONB
+                timestamp DOUBLE PRECISION NOT NULL,
+                reason TEXT
+            )
+        """)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("DEBUG: mod_logs table created or already exists in Postgres.")
 
     def log_action(self, guild_id, member_id, action, moderator, reason=None):
+        """Log a moderation action to the Postgres database."""
         member_id = int(member_id)
-        print(f"DEBUG: Logging action - Guild: {guild_id}, Member: {member_id}, Action: {action}")
-        if guild_id not in self.mod_logs:
-            self.mod_logs[guild_id] = {}
-        if member_id not in self.mod_logs[guild_id]:
-            self.mod_logs[guild_id][member_id] = []
-        
-        action_entry = {
-            "action": action,
-            "moderator": moderator,
-            "timestamp": time.time(),
-            "reason": reason
+        guild_id = int(guild_id)
+        # Serialize moderator (discord.Member object) to JSON
+        moderator_data = {
+            "id": moderator.id,
+            "name": moderator.name,
+            "mention": moderator.mention
         }
-        self.mod_logs[guild_id][member_id].append(action_entry)
-        print(f"DEBUG: Current mod_logs for guild {guild_id}, member {member_id} (length: {len(self.mod_logs[guild_id][member_id])}): {self.mod_logs[guild_id][member_id]}")
+        moderator_json = json.dumps(moderator_data)
+        timestamp = time.time()
+        
+        print(f"DEBUG: Logging action to Postgres - Guild: {guild_id}, Member: {member_id}, Action: {action}")
+        
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO mod_logs (guild_id, member_id, action, moderator, timestamp, reason)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (guild_id, member_id, action, moderator_json, timestamp, reason))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        print(f"DEBUG: Action logged to Postgres: {action} for member {member_id} in guild {guild_id}")
+
+    def _fetch_actions(self, guild_id, member_id):
+        """Fetch all actions for a member in a guild from the Postgres database."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT action, moderator, timestamp, reason
+            FROM mod_logs
+            WHERE guild_id = %s AND member_id = %s
+            ORDER BY timestamp DESC
+        """, (guild_id, member_id))
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        # Convert rows to action dictionaries
+        actions = []
+        for row in rows:
+            action, moderator_json, timestamp, reason = row
+            try:
+                moderator_data = moderator_json  # Already a dict since Postgres JSONB returns a Python dict
+                # Reconstruct a pseudo-moderator object
+                moderator = type('PseudoMember', (), {
+                    'id': moderator_data['id'],
+                    'name': moderator_data['name'],
+                    'mention': moderator_data['mention']
+                })()
+                actions.append({
+                    "action": action,
+                    "moderator": moderator,
+                    "timestamp": timestamp,
+                    "reason": reason
+                })
+            except (TypeError, KeyError) as e:
+                print(f"DEBUG: Failed to process moderator data: {moderator_json}, error: {str(e)}")
+                continue
+        
+        print(f"DEBUG: Fetched actions for member {member_id} in guild {guild_id} (length: {len(actions)}): {actions}")
+        return actions
 
     @commands.command()
     @commands.has_permissions(moderate_members=True)
@@ -33,44 +124,16 @@ class History(commands.Cog):
             guild_id = ctx.guild.id
             member_id = member.id
 
-            if guild_id not in self.mod_logs or member_id not in self.mod_logs[guild_id] or not self.mod_logs[guild_id][member_id]:
+            # Fetch actions from the database
+            actions = self._fetch_actions(guild_id, member_id)
+            
+            if not actions:
                 await ctx.send(f"No moderation history found for {member.mention}.")
                 return
 
-            actions = self.mod_logs[guild_id][member_id]
-            print(f"DEBUG: Raw actions for member {member_id} in guild {guild_id} (length: {len(actions)}): {actions}")
-            # Log types of each action
-            print(f"DEBUG: Action types: {[type(action).__name__ for action in actions]}")
-
-            # Filter valid actions with stricter checks
-            valid_actions = []
-            invalid_actions = []
-            for action in actions:
-                if isinstance(action, dict) and all(key in action for key in ["action", "moderator", "timestamp"]) and isinstance(action["timestamp"], (int, float)):
-                    valid_actions.append(action)
-                else:
-                    invalid_actions.append(action)
-
-            if invalid_actions:
-                print(f"DEBUG: Invalid actions found and will be removed: {invalid_actions}")
-                self.mod_logs[guild_id][member_id] = valid_actions
-                await ctx.send("Removed invalid history entries.")
-                if not valid_actions:
-                    await ctx.send(f"No valid moderation history found for {member.mention}.")
-                    return
-
-            print(f"DEBUG: Valid actions after filtering (length: {len(valid_actions)}): {valid_actions}")
-            print(f"DEBUG: Valid action types: {[type(action).__name__ for action in valid_actions]}")
-
-            # Double-check valid_actions before proceeding
-            for idx, action in enumerate(valid_actions):
-                if not isinstance(action, dict):
-                    print(f"DEBUG: Unexpected invalid action in valid_actions at index {idx}: {action}")
-                    valid_actions = [a for a in valid_actions if isinstance(a, dict)]
-
             # Pagination setup
             actions_per_page = 5
-            total_pages = math.ceil(len(valid_actions) / actions_per_page)
+            total_pages = math.ceil(len(actions) / actions_per_page)
             current_page = 1
 
             utils = self.bot.get_cog('Utils')
@@ -81,15 +144,11 @@ class History(commands.Cog):
             def get_page(page_num):
                 start_idx = (page_num - 1) * actions_per_page
                 end_idx = start_idx + actions_per_page
-                page_actions = valid_actions[start_idx:end_idx]
+                page_actions = actions[start_idx:end_idx]
                 print(f"DEBUG: Page actions for page {page_num} (length: {len(page_actions)}): {page_actions}")
-                print(f"DEBUG: Page action types: {[type(action).__name__ for action in page_actions]}")
                 description = ""
                 for idx, action in enumerate(page_actions):
                     print(f"DEBUG: Processing action at index {idx}: {action}")
-                    if not isinstance(action, dict):
-                        print(f"DEBUG: Skipping invalid action in get_page at index {idx}: {action}")
-                        continue
                     try:
                         timestamp = discord.utils.format_dt(int(action["timestamp"]), style="R")
                     except (TypeError, ValueError) as e:
@@ -144,8 +203,14 @@ class History(commands.Cog):
     @commands.command()
     @commands.has_permissions(administrator=True)
     async def clearhistory(self, ctx):
+        """Clear all moderation history from the Postgres database."""
         try:
-            self.mod_logs.clear()
+            conn = psycopg2.connect(**self.db_params)
+            cursor = conn.cursor()
+            cursor.execute("TRUNCATE TABLE mod_logs")
+            conn.commit()
+            cursor.close()
+            conn.close()
             await ctx.send("All moderation history has been cleared.")
             print("DEBUG: All mod_logs cleared via clearhistory command.")
         except Exception as e:
