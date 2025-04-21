@@ -1,4 +1,4 @@
-# cogs/moderationhistory.py (Revised)
+# cogs/moderationhistory.py (Improved Error Reporting)
 
 import os
 import psycopg2
@@ -96,7 +96,7 @@ class ModerationHistory(commands.Cog):
                          member_display = f"ID: {member_id}"
                          member_mention = member_display # No mention available
                     else:
-                         member_display = member.mention
+                         member_display = member.mention # Use display name or name if needed
                          member_mention = member.mention # Use mention if we have the user object
 
                     # Append data as a dictionary
@@ -161,10 +161,10 @@ class ModerationHistory(commands.Cog):
 
                 description = ""
                 for i, action_data in enumerate(page_actions):
-                    # **** ADDED CHECK AND DETAILED DEBUGGING ****
+                    # Basic check
                     if not isinstance(action_data, dict):
                         print(f"DEBUG: Skipping invalid action_data at index {start_idx + i}. Expected dict, got {type(action_data)}: {action_data}")
-                        description += f"Error processing action at index {start_idx + i}\n\n"
+                        description += f"Error processing action at index {start_idx + i} (Invalid Data Type)\n\n"
                         continue # Skip this item
 
                     try:
@@ -178,7 +178,7 @@ class ModerationHistory(commands.Cog):
                         # Format timestamp
                         if timestamp_val is not None:
                             try:
-                                formatted_timestamp = discord.utils.format_dt(int(timestamp_val), style="R")
+                                formatted_timestamp = discord.utils.format_dt(int(float(timestamp_val)), style="R") # Ensure it's float before int
                             except (TypeError, ValueError):
                                 print(f"DEBUG: Invalid timestamp value {timestamp_val} for case {case_id}")
                                 formatted_timestamp = "Invalid time"
@@ -192,9 +192,11 @@ class ModerationHistory(commands.Cog):
 
                     except Exception as e:
                         # Catch any unexpected error during processing of a specific action_data dict
-                        print(f"ERROR: Unexpected error processing action_data dict: {action_data}. Error: {e}")
+                        error_type = type(e).__name__ # Get the name of the exception type
+                        print(f"ERROR: Unexpected error processing action_data dict: {action_data}. Error Type: {error_type}, Message: {e}")
                         traceback.print_exc()
-                        description += f"Error processing case ID {action_data.get('case_id', 'N/A')}\n\n"
+                        # **** MODIFIED LINE **** Include error type in the embed message
+                        description += f"Error processing case ID {action_data.get('case_id', 'N/A')} ({error_type})\n\n"
                         continue # Skip to next action
 
                 embed = utils.create_embed(ctx, title=f"Moderation Actions by {member.display_name}")
@@ -214,9 +216,6 @@ class ModerationHistory(commands.Cog):
                     await message.add_reaction("➡️")
                 else:
                     print("WARN: Bot lacks Add Reactions permission for pagination.")
-                    # Optionally inform the user pagination is unavailable
-                    # await ctx.send("Pagination unavailable: I lack 'Add Reactions' permission.", delete_after=10)
-
 
                 def check(reaction, user):
                     return user == ctx.author and reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"]
@@ -244,18 +243,13 @@ class ModerationHistory(commands.Cog):
                         if can_manage_reactions:
                              try:
                                  await message.remove_reaction(reaction.emoji, user)
-                             except discord.Forbidden:
-                                 # This might happen if permissions change mid-command
-                                 can_manage_reactions = False # Stop trying to remove
-                             except discord.NotFound:
-                                 pass # Reaction already gone
+                             except (discord.Forbidden, discord.NotFound): pass # Ignore if removal fails
 
                     except asyncio.TimeoutError:
                         # Stop listening for reactions after timeout
-                        if can_manage_reactions:
+                        if can_manage_reactions and message: # Check message exists
                             try: await message.clear_reactions()
-                            except discord.Forbidden: pass
-                            except discord.NotFound: pass
+                            except (discord.Forbidden, discord.NotFound, discord.HTTPException): pass
                         break # Exit pagination loop
                     except discord.HTTPException as e:
                         print(f"ERROR: HTTPException during pagination: {e}")
@@ -305,5 +299,3 @@ class ModerationHistory(commands.Cog):
 async def setup(bot):
     await bot.add_cog(ModerationHistory(bot))
 
-async def setup(bot):
-    await bot.add_cog(ModerationHistory(bot))
