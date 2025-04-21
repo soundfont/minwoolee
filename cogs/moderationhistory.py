@@ -1,4 +1,4 @@
-# cogs/moderationhistory.py (AttributeError Fix)
+# cogs/moderationhistory.py (Error Reporting)
 
 import os
 import psycopg2
@@ -96,15 +96,15 @@ class ModerationHistory(commands.Cog):
                          member_display = f"ID: {member_id}"
                          member_mention = member_display # No mention available
                     else:
-                         member_display = member.display_name # Use display name as fallback if needed
+                         member_display = member.mention # Use display name or name if needed
                          member_mention = member.mention # Use mention if we have the user object
 
                     # Append data as a dictionary
                     actions.append({
                         "case_id": row['id'],
                         "member_id": member_id, # Store ID for potential later fetching
-                        "member_display": str(member_display), # Ensure string
-                        "member_mention": str(member_mention), # Ensure string
+                        "member_display": member_display, # Store display string
+                        "member_mention": member_mention, # Store mention string
                         "action": row['action'],
                         "timestamp": row['timestamp'],
                         "reason": row['reason']
@@ -169,44 +169,33 @@ class ModerationHistory(commands.Cog):
 
                     try:
                         # Safely get values using .get() with default values
-                        case_id_val = action_data.get("case_id", "N/A")
-                        action_val = action_data.get("action", "N/A")
+                        case_id = action_data.get("case_id", "N/A")
+                        action = action_data.get("action", "N/A")
                         timestamp_val = action_data.get("timestamp")
-                        reason_val = action_data.get("reason", "No reason provided")
-                        target_mention_val = action_data.get("member_mention", "N/A") # Use pre-fetched mention
+                        reason = action_data.get("reason", "No reason provided")
+                        target_member_mention = action_data.get("member_mention", "N/A") # Use pre-fetched mention
 
                         # Format timestamp
                         if timestamp_val is not None:
                             try:
-                                formatted_timestamp_val = discord.utils.format_dt(int(float(timestamp_val)), style="R") # Ensure it's float before int
+                                formatted_timestamp = discord.utils.format_dt(int(float(timestamp_val)), style="R") # Ensure it's float before int
                             except (TypeError, ValueError):
-                                print(f"DEBUG: Invalid timestamp value {timestamp_val} for case {case_id_val}")
-                                formatted_timestamp_val = "Invalid time"
+                                print(f"DEBUG: Invalid timestamp value {timestamp_val} for case {case_id}")
+                                formatted_timestamp = "Invalid time"
                         else:
-                            formatted_timestamp_val = "No time recorded"
+                            formatted_timestamp = "No time recorded"
 
-                        # **** ADDED EXPLICIT STRING CONVERSION ****
-                        # Ensure all components are strings before formatting
-                        str_case_id = str(case_id_val)
-                        str_action = str(action_val)
-                        str_target_mention = str(target_mention_val)
-                        str_formatted_timestamp = str(formatted_timestamp_val)
-                        str_reason = str(reason_val)
-
-                        # Log types just before formatting (optional)
-                        # print(f"DEBUG TYPES: case={type(str_case_id)}, action={type(str_action)}, target={type(str_target_mention)}, time={type(str_formatted_timestamp)}, reason={type(str_reason)}")
-
-                        # Build description entry using pre-converted strings
-                        description += (f"**Case ID:** {str_case_id} | **Action:** {str_action} | "
-                                        f"**Target:** {str_target_mention}\n"
-                                        f"**Time:** {str_formatted_timestamp} | **Reason:** {str_reason}\n\n")
+                        # Build description entry
+                        description += (f"**Case ID:** {case_id} | **Action:** {action} | "
+                                        f"**Target:** {target_member_mention}\n"
+                                        f"**Time:** {formatted_timestamp} | **Reason:** {reason}\n\n")
 
                     except Exception as e:
                         # Catch any unexpected error during processing of a specific action_data dict
                         error_type = type(e).__name__ # Get the name of the exception type
                         print(f"ERROR: Unexpected error processing action_data dict: {action_data}. Error Type: {error_type}, Message: {e}")
                         traceback.print_exc()
-                        # Include error type in the embed message
+                        # **** MODIFIED LINE **** Include error type in the embed message
                         description += f"Error processing case ID {action_data.get('case_id', 'N/A')} ({error_type})\n\n"
                         continue # Skip to next action
 
@@ -219,8 +208,9 @@ class ModerationHistory(commands.Cog):
             # Initial message send
             message = await ctx.send(embed=get_page_embed(current_page))
 
-            # --- Pagination Logic (Unchanged from previous revision) ---
+            # Add pagination reactions if more than one page
             if total_pages > 1:
+                # Ensure bot has permissions before adding reactions
                 if ctx.guild.me.permissions_in(ctx.channel).add_reactions:
                     await message.add_reaction("⬅️")
                     await message.add_reaction("➡️")
@@ -230,10 +220,14 @@ class ModerationHistory(commands.Cog):
                 def check(reaction, user):
                     return user == ctx.author and reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"]
 
+                # Pagination loop
                 while True:
+                    # Check if bot can still manage reactions (permissions might change)
                     can_manage_reactions = ctx.guild.me.permissions_in(ctx.channel).manage_messages
+
                     try:
                         reaction, user = await self.bot.wait_for('reaction_add', timeout=60.0, check=check)
+
                         page_changed = False
                         if str(reaction.emoji) == "⬅️" and current_page > 1:
                             current_page -= 1
@@ -245,24 +239,27 @@ class ModerationHistory(commands.Cog):
                         if page_changed:
                             await message.edit(embed=get_page_embed(current_page))
 
+                        # Remove the user's reaction if possible
                         if can_manage_reactions:
                              try:
                                  await message.remove_reaction(reaction.emoji, user)
                              except (discord.Forbidden, discord.NotFound): pass # Ignore if removal fails
+
                     except asyncio.TimeoutError:
+                        # Stop listening for reactions after timeout
                         if can_manage_reactions and message: # Check message exists
                             try: await message.clear_reactions()
                             except (discord.Forbidden, discord.NotFound, discord.HTTPException): pass
-                        break
+                        break # Exit pagination loop
                     except discord.HTTPException as e:
                         print(f"ERROR: HTTPException during pagination: {e}")
-                        break
-                    except Exception as e:
+                        break # Exit loop on HTTP error
+                    except Exception as e: # Catch broader errors during wait_for/edit
                          print(f"ERROR: Unexpected error in pagination loop: {e}")
                          traceback.print_exc()
                          break
 
-        # --- Exception Handling (Unchanged from previous revision) ---
+
         except discord.Forbidden as e:
             await ctx.send(f"I lack permissions for this command. Error: {e.text}")
         except discord.HTTPException as e:
@@ -270,15 +267,13 @@ class ModerationHistory(commands.Cog):
         except ConnectionError as e:
              await ctx.send(f"Database error: {e}")
         except Exception as e:
-            await ctx.send(f"An unexpected error occurred. Check logs for details.")
+            await ctx.send(f"An unexpected error occurred. Check logs for details.") # User-friendly message
             print(f"ERROR: Unexpected error in moderationhistory command: {e}")
-            traceback.print_exc()
+            traceback.print_exc() # Log detailed error
 
-    # --- Error Handler (Unchanged from previous revision) ---
     @moderationhistory.error
     async def moderationhistory_error(self, ctx, error):
         """ Error handler for the moderationhistory command. """
-        # ... (same as previous revision) ...
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("You need the 'Manage Messages' permission to use this command.")
         elif isinstance(error, commands.MemberNotFound):
@@ -303,7 +298,3 @@ class ModerationHistory(commands.Cog):
 # Setup function to add the cog to the bot
 async def setup(bot):
     await bot.add_cog(ModerationHistory(bot))
-
-
-    await bot.add_cog(ModerationHistory(bot))
-
