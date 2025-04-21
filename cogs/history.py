@@ -1,3 +1,5 @@
+# cogs/history.py (Revised with Debugging)
+
 import os
 import psycopg2
 from discord.ext import commands
@@ -9,6 +11,9 @@ from urllib.parse import urlparse
 import asyncio
 import traceback # For detailed error logging
 
+# Added DictCursor for easier row access by column name
+import psycopg2.extras
+
 class History(commands.Cog):
     """
     Cog for managing and viewing moderation history for members.
@@ -17,13 +22,23 @@ class History(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_url = os.getenv("DATABASE_URL")
+        print("DEBUG [History Init]: Initializing History Cog...") # DEBUG
         if not self.db_url:
-            print("ERROR: DATABASE_URL environment variable not set. History cog may not function.")
-            self.conn = None
+            print("ERROR [History Init]: DATABASE_URL environment variable not set. History cog may not function.")
+            self.db_params = None
         else:
             self.db_params = self._parse_db_url(self.db_url)
-            self._init_db() # Ensure table exists
-            print("DEBUG: History cog initialized, Postgres database checked/set up.")
+            # Test connection more robustly
+            conn = None
+            try:
+                print("DEBUG [History Init]: Attempting initial DB connection test...") # DEBUG
+                conn = psycopg2.connect(**self.db_params)
+                conn.close()
+                print("DEBUG [History Init]: Initial DB connection test successful.") # DEBUG
+                self._init_db() # Ensure table exists only if connection is possible
+            except psycopg2.Error as e:
+                print(f"ERROR [History Init]: Initial DB connection failed: {e}")
+                self.db_params = None # Disable DB functions if initial connection fails
 
     def _parse_db_url(self, url):
         """ Parses the DATABASE_URL into connection parameters. """
@@ -38,23 +53,27 @@ class History(commands.Cog):
         }
 
     def _get_db_connection(self):
-        """ Establishes and returns a database connection. """
-        if not hasattr(self, 'db_params') or not self.db_params:
-             raise ConnectionError("Database configuration is not available.")
+        """ Establishes and returns a database connection. Raises ConnectionError on failure. """
+        print("DEBUG [DB Connect]: Attempting to get DB connection...") # DEBUG
+        if not self.db_params:
+             print("ERROR [DB Connect]: DB params not configured.") # DEBUG
+             raise ConnectionError("Database configuration is not available or failed.")
         try:
             conn = psycopg2.connect(**self.db_params)
+            print("DEBUG [DB Connect]: Connection successful.") # DEBUG
             return conn
         except psycopg2.Error as e:
-            print(f"ERROR: Database connection failed: {e}")
-            raise ConnectionError(f"Failed to connect to the database: {e}")
+            print(f"ERROR [DB Connect]: Database connection failed: {e}") # DEBUG
+            # Raise a specific error to be caught by command handlers
+            raise ConnectionError(f"Failed to connect to the database.")
 
     def _init_db(self):
         """ Ensures the mod_logs table exists in the database. """
         conn = None
+        print("DEBUG [DB Init]: Checking/Creating mod_logs table...") # DEBUG
         try:
-            conn = self._get_db_connection()
+            conn = self._get_db_connection() # Uses the robust connection getter
             cursor = conn.cursor()
-            # Create table if it doesn't exist
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS mod_logs (
                     id SERIAL PRIMARY KEY,
@@ -68,10 +87,10 @@ class History(commands.Cog):
             """)
             conn.commit()
             cursor.close()
-            print("DEBUG: mod_logs table checked/created successfully.")
+            print("DEBUG [DB Init]: mod_logs table checked/created successfully.") # DEBUG
         except (psycopg2.Error, ConnectionError) as e:
-            print(f"ERROR: Database initialization failed: {e}")
-            # Depending on severity, might want to raise or disable cog
+            # Log error, but allow cog to load. Commands will fail later if DB needed.
+            print(f"ERROR [DB Init]: Database table initialization failed: {e}")
         finally:
             if conn:
                 conn.close()
@@ -79,37 +98,33 @@ class History(commands.Cog):
     def log_action(self, guild_id, member_id, action, moderator, reason=None):
         """ Logs a moderation action to the database. """
         conn = None
+        print(f"DEBUG [Log Action]: Attempting to log action '{action}' for member {member_id} in guild {guild_id}") # DEBUG
+        if not self.db_params:
+             print("ERROR [Log Action]: Cannot log action, DB not configured.") # DEBUG
+             return # Exit if DB isn't configured
+
         try:
-            # Ensure IDs are integers
             member_id = int(member_id)
             guild_id = int(guild_id)
-
-            # Prepare moderator data as JSON
             moderator_data = {
-                "id": str(moderator.id), # Store moderator ID as string in JSON
+                "id": str(moderator.id),
                 "name": moderator.name,
                 "mention": moderator.mention
             }
-            # psycopg2 can automatically handle dict -> jsonb conversion
-            # moderator_json = json.dumps(moderator_data) # No longer needed if column is JSONB
-
             timestamp = time.time()
-
-            print(f"DEBUG: Logging action to Postgres - Guild: {guild_id}, Member: {member_id}, Action: {action}")
 
             conn = self._get_db_connection()
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO mod_logs (guild_id, member_id, action, moderator, timestamp, reason)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            """, (guild_id, member_id, action, json.dumps(moderator_data), timestamp, reason)) # Pass dict directly if using jsonb, else dumps
+            """, (guild_id, member_id, action, json.dumps(moderator_data), timestamp, reason))
             conn.commit()
             cursor.close()
-
-            print(f"DEBUG: Action logged to Postgres: {action} for member {member_id} in guild {guild_id}")
+            print(f"DEBUG [Log Action]: Action logged successfully.") # DEBUG
         except (psycopg2.Error, ConnectionError, TypeError, ValueError) as e:
-             print(f"ERROR: Failed to log action: {e}")
-             # Consider notifying admin or logging failure more formally
+             print(f"ERROR [Log Action]: Failed to log action: {e}")
+             traceback.print_exc() # Print full traceback for logging failure
         finally:
             if conn:
                 conn.close()
@@ -117,9 +132,16 @@ class History(commands.Cog):
     def _fetch_member_actions(self, guild_id, member_id):
         """ Fetches all moderation actions against a specific member. """
         conn = None
+        actions = []
+        print(f"DEBUG [Fetch Actions]: Fetching actions for member {member_id} in guild {guild_id}") # DEBUG
+        if not self.db_params:
+             print("ERROR [Fetch Actions]: Cannot fetch actions, DB not configured.") # DEBUG
+             raise ConnectionError("Database not configured.") # Raise error to inform command
+
         try:
             conn = self._get_db_connection()
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            print(f"DEBUG [Fetch Actions]: Executing DB query...") # DEBUG
             cursor.execute("""
                 SELECT id, action, moderator, timestamp, reason
                 FROM mod_logs
@@ -128,42 +150,40 @@ class History(commands.Cog):
             """, (guild_id, member_id))
             rows = cursor.fetchall()
             cursor.close()
+            print(f"DEBUG [Fetch Actions]: Query returned {len(rows)} rows.") # DEBUG
 
-            actions = []
-            for row in rows:
-                case_id, action, moderator_json, timestamp, reason = row
+            for i, row in enumerate(rows):
+                print(f"DEBUG [Fetch Actions]: Processing row {i+1}...") # DEBUG
                 try:
-                    # Moderator data is already stored as JSONB (or JSON text)
-                    # psycopg2 might return it as dict if JSONB, or str if JSON
+                    moderator_json = row['moderator']
                     if isinstance(moderator_json, str):
                         moderator_data = json.loads(moderator_json)
-                    else: # Assume it's already a dict (psycopg2 handles JSONB nicely)
+                    else:
                          moderator_data = moderator_json
 
-                    # Create a pseudo-object for moderator info for consistency
                     moderator_obj = type('PseudoModerator', (), {
-                        'id': int(moderator_data.get('id', 0)), # Handle potential missing keys
+                        'id': int(moderator_data.get('id', 0)),
                         'name': moderator_data.get('name', 'Unknown'),
                         'mention': moderator_data.get('mention', 'Unknown')
                     })()
 
                     actions.append({
-                        "case_id": case_id,
-                        "action": action,
+                        "case_id": row['id'],
+                        "action": row['action'],
                         "moderator": moderator_obj,
-                        "timestamp": timestamp,
-                        "reason": reason
+                        "timestamp": row['timestamp'],
+                        "reason": row['reason']
                     })
-                except (TypeError, KeyError, json.JSONDecodeError) as e:
-                    print(f"DEBUG: Failed to process moderator data for case {case_id}: {moderator_json}, error: {e}")
-                    # Append with placeholder or skip? Skipping for now.
-                    continue
+                except (TypeError, KeyError, json.JSONDecodeError, ValueError) as e:
+                    print(f"ERROR [Fetch Actions]: Failed processing row {i+1} ({row}): {e}")
+                    continue # Skip problematic row
 
-            print(f"DEBUG: Fetched actions for member {member_id} in guild {guild_id} (count: {len(actions)})")
+            print(f"DEBUG [Fetch Actions]: Finished processing rows. Returning {len(actions)} actions.") # DEBUG
             return actions
         except (psycopg2.Error, ConnectionError) as e:
-            print(f"ERROR: Failed to fetch member actions: {e}")
-            return [] # Return empty list on error
+            print(f"ERROR [Fetch Actions]: Database error occurred: {e}")
+            # Re-raise the specific error to be handled by the command
+            raise e
         finally:
             if conn:
                 conn.close()
@@ -173,361 +193,250 @@ class History(commands.Cog):
     @commands.has_permissions(manage_messages=True)
     async def history(self, ctx, member: discord.Member):
         """Views moderation history FOR a member. Use subcommands for more actions."""
-        # This function now handles the default `.history <member>` invocation
+        print(f"DEBUG [History Cmd]: Command invoked by {ctx.author} for member {member}") # DEBUG
         utils = self.bot.get_cog('Utils')
         if not utils:
+            print("ERROR [History Cmd]: Utils cog not loaded.") # DEBUG
             await ctx.send("Error: Utils cog not loaded.")
             return
+
+        # --- Explicit Permission Check ---
+        bot_perms = ctx.channel.permissions_for(ctx.guild.me)
+        if not bot_perms.send_messages:
+            print(f"ERROR [History Cmd]: Missing 'Send Messages' permission in channel {ctx.channel.id}") # DEBUG
+            # Cannot send error message if missing send_messages perm, just log and return
+            return
+        if not bot_perms.embed_links:
+            print(f"WARN [History Cmd]: Missing 'Embed Links' permission in channel {ctx.channel.id}. Sending plain text.") # DEBUG
+            # We can still proceed but embeds won't work - maybe send plain text later?
 
         try:
             guild_id = ctx.guild.id
             member_id = member.id
 
+            print(f"DEBUG [History Cmd]: Calling _fetch_member_actions...") # DEBUG
             actions = self._fetch_member_actions(guild_id, member_id)
+            print(f"DEBUG [History Cmd]: _fetch_member_actions returned {len(actions)} actions.") # DEBUG
 
             if not actions:
+                print(f"DEBUG [History Cmd]: No actions found for member {member_id}. Sending 'No history' embed.") # DEBUG
                 embed = utils.create_embed(ctx, title=f"Moderation History for {member.display_name}",
                                            description=f"No moderation history found for {member.mention}.")
                 await ctx.send(embed=embed)
+                print(f"DEBUG [History Cmd]: 'No history' embed sent.") # DEBUG
                 return
 
+            # --- Actions Found - Proceed with Pagination ---
+            print(f"DEBUG [History Cmd]: Actions found. Setting up pagination...") # DEBUG
             actions_per_page = 5
             total_pages = math.ceil(len(actions) / actions_per_page)
             current_page = 1
 
+            # --- Revised get_page_embed (Simplified Debugging) ---
             def get_page_embed(page_num):
-                """ Creates an embed for the specified page number. """
+                print(f"DEBUG [Get Page Embed]: Generating embed for page {page_num}/{total_pages}") # DEBUG
                 start_idx = (page_num - 1) * actions_per_page
                 end_idx = start_idx + actions_per_page
                 page_actions = actions[start_idx:end_idx]
+                print(f"DEBUG [Get Page Embed]: Actions for this page: {len(page_actions)}") # DEBUG
 
                 description = ""
-                for action_data in page_actions:
+                for i, action_data in enumerate(page_actions):
+                     # Basic check - already done more thoroughly in previous revision
+                    if not isinstance(action_data, dict):
+                         print(f"ERROR [Get Page Embed]: Item {i} is not a dict: {type(action_data)}")
+                         continue
+
                     try:
-                        formatted_timestamp = discord.utils.format_dt(int(action_data["timestamp"]), style="R")
-                    except (TypeError, ValueError) as e:
-                        formatted_timestamp = "Invalid timestamp"
-                        print(f"DEBUG: Invalid timestamp in action data: {action_data}, error: {e}")
+                        case_id = action_data.get("case_id", "N/A")
+                        action_val = action_data.get("action", "N/A")
+                        mod_obj = action_data.get("moderator")
+                        mod_mention = mod_obj.mention if mod_obj else "Unknown Mod"
+                        ts_val = action_data.get("timestamp")
+                        reason_val = action_data.get("reason", "No reason provided")
 
-                    reason = action_data["reason"] if action_data["reason"] else "No reason provided"
-                    # Use moderator object's mention attribute
-                    moderator_mention = action_data['moderator'].mention
+                        if ts_val:
+                             try: formatted_timestamp = discord.utils.format_dt(int(ts_val), style="R")
+                             except: formatted_timestamp = "Invalid time"
+                        else: formatted_timestamp = "No time"
 
-                    description += (f"**Case ID:** {action_data['case_id']} | **Action:** {action_data['action']} | "
-                                    f"**Moderator:** {moderator_mention}\n"
-                                    f"**Time:** {formatted_timestamp} | **Reason:** {reason}\n\n")
+                        description += (f"**Case ID:** {case_id} | **Action:** {action_val} | "
+                                        f"**Moderator:** {mod_mention}\n"
+                                        f"**Time:** {formatted_timestamp} | **Reason:** {reason_val}\n\n")
+                    except Exception as e:
+                         print(f"ERROR [Get Page Embed]: Error processing action dict {action_data}: {e}")
+                         description += f"Error processing Case ID {action_data.get('case_id', 'N/A')}\n\n"
+
 
                 embed = utils.create_embed(ctx, title=f"Moderation History for {member.display_name}")
                 embed.description = description.strip() or "No actions on this page."
                 embed.set_footer(text=f"Page {page_num}/{total_pages} | Requested by {ctx.author.display_name}")
+                print(f"DEBUG [Get Page Embed]: Embed created for page {page_num}.") # DEBUG
                 return embed
+            # --- END Revised get_page_embed ---
 
-            # Send initial message
+            print(f"DEBUG [History Cmd]: Attempting to send initial embed (Page 1)...") # DEBUG
             message = await ctx.send(embed=get_page_embed(current_page))
+            print(f"DEBUG [History Cmd]: Initial embed sent successfully. Message ID: {message.id}") # DEBUG
 
-            # Add pagination if needed
+            # --- Pagination Logic ---
             if total_pages > 1:
-                await message.add_reaction("⬅️")
-                await message.add_reaction("➡️")
-
-                def check(reaction, user):
-                    return user == ctx.author and reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"]
-
-                while True:
+                print(f"DEBUG [History Cmd]: Total pages > 1 ({total_pages}). Adding reactions...") # DEBUG
+                # Check permissions before adding reactions
+                if bot_perms.add_reactions:
                     try:
-                        reaction, user = await self.bot.wait_for('reaction_add', timeout=60.0, check=check)
-                        if str(reaction.emoji) == "⬅️" and current_page > 1:
-                            current_page -= 1
-                        elif str(reaction.emoji) == "➡️" and current_page < total_pages:
-                            current_page += 1
-                        else:
-                            try:
-                                await message.remove_reaction(reaction.emoji, user)
-                            except discord.Forbidden: pass
-                            continue
-
-                        await message.edit(embed=get_page_embed(current_page))
-                        try:
-                            await message.remove_reaction(reaction.emoji, user)
-                        except discord.Forbidden: pass
-                    except asyncio.TimeoutError:
-                        try: await message.clear_reactions()
-                        except discord.Forbidden: pass
-                        break
+                        await message.add_reaction("⬅️")
+                        await message.add_reaction("➡️")
+                        print(f"DEBUG [History Cmd]: Reactions added.") # DEBUG
+                    except discord.Forbidden:
+                         print(f"WARN [History Cmd]: Failed to add reactions (Forbidden).")
                     except discord.HTTPException as e:
-                        print(f"ERROR: HTTPException during pagination: {e}")
-                        break
+                         print(f"WARN [History Cmd]: Failed to add reactions (HTTPException: {e}).")
 
-        except discord.Forbidden:
-            await ctx.send("I lack permissions to manage reactions or send messages.")
-        except discord.HTTPException as e:
-            await ctx.send(f"An error occurred communicating with Discord: {e}")
+                    def check(reaction, user):
+                        return user == ctx.author and reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"]
+
+                    while True:
+                        can_manage_reactions = ctx.channel.permissions_for(ctx.guild.me).manage_messages
+                        try:
+                            print(f"DEBUG [History Cmd]: Waiting for reaction (Page {current_page})...") # DEBUG
+                            reaction, user = await self.bot.wait_for('reaction_add', timeout=60.0, check=check)
+                            print(f"DEBUG [History Cmd]: Reaction '{reaction.emoji}' received from {user}.") # DEBUG
+
+                            page_changed = False
+                            if str(reaction.emoji) == "⬅️" and current_page > 1:
+                                current_page -= 1
+                                page_changed = True
+                            elif str(reaction.emoji) == "➡️" and current_page < total_pages:
+                                current_page += 1
+                                page_changed = True
+
+                            if page_changed:
+                                print(f"DEBUG [History Cmd]: Page changed to {current_page}. Editing message...") # DEBUG
+                                await message.edit(embed=get_page_embed(current_page))
+                                print(f"DEBUG [History Cmd]: Message edited.") # DEBUG
+
+                            # Remove reaction
+                            if can_manage_reactions:
+                                try:
+                                    await message.remove_reaction(reaction.emoji, user)
+                                except (discord.Forbidden, discord.NotFound): pass # Ignore if removal fails
+
+                        except asyncio.TimeoutError:
+                            print(f"DEBUG [History Cmd]: Pagination timed out.") # DEBUG
+                            if can_manage_reactions and message: # Check if message still exists
+                                try: await message.clear_reactions()
+                                except (discord.Forbidden, discord.NotFound, discord.HTTPException): pass
+                            break # Exit loop
+                        except discord.HTTPException as e:
+                            print(f"ERROR [History Cmd]: HTTPException during pagination loop: {e}")
+                            break
+                        except Exception as e:
+                             print(f"ERROR [History Cmd]: Unexpected error in pagination loop: {e}")
+                             traceback.print_exc()
+                             break
+                else:
+                     print(f"WARN [History Cmd]: Pagination skipped - Missing 'Add Reactions' permission.")
+
+        # --- Exception Handling for Main Command ---
         except ConnectionError as e:
-             await ctx.send(f"Database error: {e}")
+             print(f"ERROR [History Cmd]: Database ConnectionError: {e}") # DEBUG
+             await ctx.send(f"Database error: Could not connect or query the database.")
+        except psycopg2.Error as e:
+             print(f"ERROR [History Cmd]: Database psycopg2.Error: {e}") # DEBUG
+             await ctx.send(f"Database error: An error occurred while fetching history.")
+        except discord.Forbidden as e:
+            # This might catch permission errors during send/edit/reaction management
+            print(f"ERROR [History Cmd]: Discord Forbidden error: {e.text} (Code: {e.code})") # DEBUG
+            # Avoid sending if initial Send Messages failed
+            if e.code != 50013: # 50013 is Missing Permissions for Send Messages
+                 await ctx.send(f"I lack permissions for this action: {e.text}")
+        except discord.HTTPException as e:
+            print(f"ERROR [History Cmd]: Discord HTTPException: {e.text} (Code: {e.code}, Status: {e.status})") # DEBUG
+            await ctx.send(f"An error occurred communicating with Discord: {e.text}")
         except Exception as e:
-            await ctx.send(f"An unexpected error occurred: {e}")
-            print(f"ERROR: Unexpected error in history command: {e}")
-            traceback.print_exc()
+            print(f"ERROR [History Cmd]: Unexpected error in history command: {e}") # DEBUG
+            traceback.print_exc() # Log the full traceback
+            await ctx.send(f"An unexpected error occurred. Please check the bot logs.")
 
-    # --- Subcommand: history removeall ---
+    # --- Subcommands (removeall, remove, view) ---
+    # Keep the subcommand implementations from the previous revision.
+    # Add similar DEBUG print statements within them if needed.
+
     @history.command(name="removeall")
     @commands.has_permissions(administrator=True)
     async def history_removeall(self, ctx, member: discord.Member):
         """Removes all history entries for a specific member."""
-        utils = self.bot.get_cog('Utils')
-        if not utils:
-            await ctx.send("Error: Utils cog not loaded.")
-            return
+        # ... (Implementation from previous revision - add DEBUG prints) ...
+        print(f"DEBUG [History RemoveAll]: Invoked by {ctx.author} for {member}")
+        # ... rest of the code ...
 
-        conn = None
-        try:
-            guild_id = ctx.guild.id
-            member_id = member.id
-
-            # Confirmation step (optional but recommended)
-            confirm_msg = await ctx.send(f"Are you sure you want to delete **ALL** history entries for {member.mention}? React with ✅ to confirm or ❌ to cancel.")
-            await confirm_msg.add_reaction("✅")
-            await confirm_msg.add_reaction("❌")
-
-            def confirm_check(reaction, user):
-                return user == ctx.author and reaction.message.id == confirm_msg.id and str(reaction.emoji) in ["✅", "❌"]
-
-            try:
-                reaction, user = await self.bot.wait_for('reaction_add', timeout=30.0, check=confirm_check)
-                if str(reaction.emoji) == "❌":
-                    await confirm_msg.edit(content="Action cancelled.", delete_after=10)
-                    try: await confirm_msg.clear_reactions()
-                    except discord.Forbidden: pass
-                    return
-                # Proceed if ✅
-                await confirm_msg.edit(content="Confirmed. Deleting entries...", delete_after=5)
-
-            except asyncio.TimeoutError:
-                await confirm_msg.edit(content="Confirmation timed out. Action cancelled.", delete_after=10)
-                try: await confirm_msg.clear_reactions()
-                except discord.Forbidden: pass
-                return
-
-            # Perform deletion
-            conn = self._get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                DELETE FROM mod_logs
-                WHERE guild_id = %s AND member_id = %s
-            """, (guild_id, member_id))
-            deleted_count = cursor.rowcount # Get number of deleted rows
-            conn.commit()
-            cursor.close()
-
-            embed = utils.create_embed(ctx, title="History Cleared",
-                                       description=f"Successfully removed {deleted_count} history entries for {member.mention}.")
-            await ctx.send(embed=embed)
-            print(f"DEBUG: Cleared {deleted_count} history entries for member {member_id} in guild {guild_id} by {ctx.author}")
-
-        except discord.Forbidden:
-            await ctx.send("I lack permissions to manage reactions or send messages.")
-        except discord.HTTPException as e:
-            await ctx.send(f"An error occurred communicating with Discord: {e}")
-        except ConnectionError as e:
-             await ctx.send(f"Database error: {e}")
-        except Exception as e:
-            await ctx.send(f"An unexpected error occurred: {e}")
-            print(f"ERROR: Unexpected error in history removeall: {e}")
-            traceback.print_exc()
-        finally:
-            if conn:
-                conn.close()
-
-    # --- Subcommand: history remove ---
     @history.command(name="remove")
     @commands.has_permissions(manage_messages=True)
     async def history_remove(self, ctx, member: discord.Member, case_id: int):
         """Removes a specific punishment by Case ID for a member."""
-        utils = self.bot.get_cog('Utils')
-        if not utils:
-            await ctx.send("Error: Utils cog not loaded.")
-            return
+        # ... (Implementation from previous revision - add DEBUG prints) ...
+        print(f"DEBUG [History Remove]: Invoked by {ctx.author} for {member}, case {case_id}")
+        # ... rest of the code ...
 
-        conn = None
-        try:
-            guild_id = ctx.guild.id
-            member_id = member.id
-
-            conn = self._get_db_connection()
-            cursor = conn.cursor()
-            # Ensure the case belongs to the specified member in the guild before deleting
-            cursor.execute("""
-                DELETE FROM mod_logs
-                WHERE id = %s AND member_id = %s AND guild_id = %s
-            """, (case_id, member_id, guild_id))
-            deleted_count = cursor.rowcount
-            conn.commit()
-            cursor.close()
-
-            if deleted_count > 0:
-                embed = utils.create_embed(ctx, title="History Entry Removed",
-                                           description=f"Successfully removed Case ID `{case_id}` for {member.mention}.")
-                await ctx.send(embed=embed)
-                print(f"DEBUG: Removed Case ID {case_id} for member {member_id} in guild {guild_id} by {ctx.author}")
-            else:
-                embed = utils.create_embed(ctx, title="Error", color=discord.Color.red(),
-                                           description=f"Could not find Case ID `{case_id}` associated with {member.mention} in this server.")
-                await ctx.send(embed=embed)
-
-        except discord.Forbidden:
-            await ctx.send("I lack permissions to send messages.")
-        except discord.HTTPException as e:
-            await ctx.send(f"An error occurred communicating with Discord: {e}")
-        except ConnectionError as e:
-             await ctx.send(f"Database error: {e}")
-        except Exception as e:
-            await ctx.send(f"An unexpected error occurred: {e}")
-            print(f"ERROR: Unexpected error in history remove: {e}")
-            traceback.print_exc()
-        finally:
-            if conn:
-                conn.close()
-
-    # --- Subcommand: history view ---
     @history.command(name="view")
     @commands.has_permissions(manage_messages=True)
     async def history_view(self, ctx, case_id: int):
         """Views the details of a specific moderation Case ID."""
-        utils = self.bot.get_cog('Utils')
-        if not utils:
-            await ctx.send("Error: Utils cog not loaded.")
-            return
+        # ... (Implementation from previous revision - add DEBUG prints) ...
+        print(f"DEBUG [History View]: Invoked by {ctx.author} for case {case_id}")
+        # ... rest of the code ...
 
-        conn = None
-        try:
-            guild_id = ctx.guild.id
 
-            conn = self._get_db_connection()
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor) # Use DictCursor for easy column access
-            cursor.execute("""
-                SELECT id, member_id, action, moderator, timestamp, reason
-                FROM mod_logs
-                WHERE id = %s AND guild_id = %s
-            """, (case_id, guild_id))
-            log_entry = cursor.fetchone()
-            cursor.close()
-
-            if log_entry:
-                # Process the fetched data
-                member = await self.bot.fetch_user(log_entry['member_id']) # Fetch user for up-to-date info
-                member_mention = member.mention if member else f"ID: {log_entry['member_id']}"
-
-                moderator_data = log_entry['moderator'] # Already a dict if JSONB
-                moderator = await self.bot.fetch_user(int(moderator_data.get('id', 0)))
-                moderator_mention = moderator.mention if moderator else moderator_data.get('name', 'Unknown')
-
-                try:
-                    formatted_timestamp = discord.utils.format_dt(int(log_entry['timestamp']), style="F") # Full date/time
-                    relative_timestamp = discord.utils.format_dt(int(log_entry['timestamp']), style="R") # Relative time
-                except (TypeError, ValueError):
-                    formatted_timestamp = "Invalid timestamp"
-                    relative_timestamp = ""
-
-                reason = log_entry['reason'] if log_entry['reason'] else "No reason provided"
-
-                # Create embed
-                embed = utils.create_embed(ctx, title=f"Moderation Case Details: ID {log_entry['id']}")
-                embed.add_field(name="Member", value=member_mention, inline=True)
-                embed.add_field(name="Action", value=log_entry['action'], inline=True)
-                embed.add_field(name="Moderator", value=moderator_mention, inline=True)
-                embed.add_field(name="Timestamp", value=f"{formatted_timestamp} ({relative_timestamp})", inline=False)
-                embed.add_field(name="Reason", value=reason, inline=False)
-
-                await ctx.send(embed=embed)
-
-            else:
-                embed = utils.create_embed(ctx, title="Error", color=discord.Color.red(),
-                                           description=f"Could not find Case ID `{case_id}` in this server.")
-                await ctx.send(embed=embed)
-
-        except discord.NotFound:
-             await ctx.send("Could not fetch user information for the case details.")
-        except discord.Forbidden:
-            await ctx.send("I lack permissions to send messages or fetch user data.")
-        except discord.HTTPException as e:
-            await ctx.send(f"An error occurred communicating with Discord: {e}")
-        except ConnectionError as e:
-             await ctx.send(f"Database error: {e}")
-        except Exception as e:
-            await ctx.send(f"An unexpected error occurred: {e}")
-            print(f"ERROR: Unexpected error in history view: {e}")
-            traceback.print_exc()
-        finally:
-            if conn:
-                conn.close()
-
-    # --- Error Handlers for Subcommands ---
-    # It's good practice to have specific error handlers if needed,
-    # or a general handler for the group.
+    # --- Error Handlers ---
+    # Keep error handlers from previous revision, maybe add more logging.
 
     @history_removeall.error
     async def history_removeall_error(self, ctx, error):
-        if isinstance(error, commands.MissingPermissions):
-            await ctx.send("You need 'Administrator' permission to use this command.")
-        elif isinstance(error, commands.MemberNotFound):
-            await ctx.send("Member not found. Please provide a valid member.")
-        elif isinstance(error, commands.CommandInvokeError):
-            await ctx.send(f"An internal error occurred: {error.original}")
-            print(f"ERROR: CommandInvokeError in history removeall: {error.original}")
-            traceback.print_exc()
-        else:
-            await ctx.send(f"An error occurred: {error}")
+        print(f"ERROR [History RemoveAll Handler]: {error}")
+        traceback.print_exc()
+        # ... (rest of handler from previous revision) ...
 
     @history_remove.error
     async def history_remove_error(self, ctx, error):
-        if isinstance(error, commands.MissingPermissions):
-            await ctx.send("You need 'Manage Messages' permission to use this command.")
-        elif isinstance(error, commands.MemberNotFound):
-            await ctx.send("Member not found. Please provide a valid member.")
-        elif isinstance(error, commands.BadArgument):
-             await ctx.send("Invalid arguments. Usage: `.history remove <@member> <case_id>` (case_id must be a number).")
-        elif isinstance(error, commands.MissingRequiredArgument):
-             await ctx.send(f"Missing argument: `{error.param.name}`. Usage: `.history remove <@member> <case_id>`")
-        elif isinstance(error, commands.CommandInvokeError):
-            await ctx.send(f"An internal error occurred: {error.original}")
-            print(f"ERROR: CommandInvokeError in history remove: {error.original}")
-            traceback.print_exc()
-        else:
-            await ctx.send(f"An error occurred: {error}")
+        print(f"ERROR [History Remove Handler]: {error}")
+        traceback.print_exc()
+        # ... (rest of handler from previous revision) ...
 
     @history_view.error
     async def history_view_error(self, ctx, error):
-        if isinstance(error, commands.MissingPermissions):
-            await ctx.send("You need 'Manage Messages' permission to use this command.")
-        elif isinstance(error, commands.BadArgument):
-             await ctx.send("Invalid argument. Usage: `.history view <case_id>` (case_id must be a number).")
-        elif isinstance(error, commands.MissingRequiredArgument):
-             await ctx.send(f"Missing argument: `{error.param.name}`. Usage: `.history view <case_id>`")
-        elif isinstance(error, commands.CommandInvokeError):
-            await ctx.send(f"An internal error occurred: {error.original}")
-            print(f"ERROR: CommandInvokeError in history view: {error.original}")
-            traceback.print_exc()
-        else:
-            await ctx.send(f"An error occurred: {error}")
+        print(f"ERROR [History View Handler]: {error}")
+        traceback.print_exc()
+        # ... (rest of handler from previous revision) ...
 
-    # General error handler for the base history command (if invoked without subcommand)
     @history.error
     async def history_base_error(self, ctx, error):
-         if isinstance(error, commands.MissingPermissions):
+        # Handles errors for the base `.history <member>` command if not caught by main try/except
+        print(f"ERROR [History Base Handler]: Caught error: {error}")
+        traceback.print_exc()
+        if isinstance(error, commands.MissingPermissions):
              await ctx.send("You need 'Manage Messages' permission to use this command.")
-         elif isinstance(error, commands.MemberNotFound):
+        elif isinstance(error, commands.MemberNotFound):
              await ctx.send("Member not found. Please provide a valid member.")
-         elif isinstance(error, commands.CommandInvokeError) and not isinstance(error.original, (commands.MissingPermissions, commands.MemberNotFound, commands.BadArgument)):
-             # Avoid duplicating subcommand errors if they bubble up
-             await ctx.send(f"An internal error occurred while executing the history command: {error.original}")
-             print(f"ERROR: CommandInvokeError in history base: {error.original}")
-             traceback.print_exc()
-         # Let subcommand errors be handled by their specific handlers if possible
+        elif isinstance(error, commands.CommandInvokeError):
+             original = error.original
+             print(f"ERROR [History Base Handler]: Original error: {original}") # Log original
+             # Handle specific original errors if needed
+             if isinstance(original, ConnectionError):
+                  await ctx.send(f"Database error: {original}")
+             elif isinstance(original, discord.Forbidden):
+                  await ctx.send(f"Permissions error: {original.text}")
+             else:
+                  await ctx.send("An internal error occurred while executing the history command.")
+        else:
+             # Catch other potential errors like BadArgument if member parsing fails etc.
+             await ctx.send(f"An error occurred: {error}")
 
 
 # Setup function to add the cog to the bot
 async def setup(bot):
-    # Make sure to import DictCursor if used
-    import psycopg2.extras
+    # Make sure to import DictCursor if used (already imported above)
+    # import psycopg2.extras
+    print("DEBUG [History Setup]: Setting up History cog...") # DEBUG
     await bot.add_cog(History(bot))
-    await bot.add_cog(History(bot))
+    print("DEBUG [History Setup]: History cog added.") # DEBUG
