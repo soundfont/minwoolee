@@ -1,4 +1,4 @@
-# cogs/moderationhistory.py (Timestamp Fix)
+# cogs/moderationhistory.py (Timestamp Fix 2)
 
 import os
 import psycopg2
@@ -18,7 +18,7 @@ class ModerationHistory(commands.Cog):
     """
     Cog for viewing moderation actions performed BY a specific moderator.
     """
-    # ... (Keep __init__, _parse_db_url, _get_db_connection, _fetch_moderator_actions the same) ...
+    # ... (Keep __init__, _parse_db_url, _get_db_connection the same) ...
     def __init__(self, bot):
         self.bot = bot
         self.db_url = os.getenv("DATABASE_URL")
@@ -231,20 +231,87 @@ class ModerationHistory(commands.Cog):
             # --- END REVISED get_page_embed ---
 
             # --- Rest of the command (Initial send, Pagination Logic) ---
-            # ... (Keep the rest of the moderationhistory command the same) ...
             message = await ctx.send(embed=get_page_embed(current_page))
-            # ... (Keep pagination logic the same) ...
 
+            if total_pages > 1:
+                if ctx.guild.me.permissions_in(ctx.channel).add_reactions:
+                    await message.add_reaction("⬅️")
+                    await message.add_reaction("➡️")
+                else:
+                    print("WARN: Bot lacks Add Reactions permission for pagination.")
 
-        # --- Exception Handling (Keep the same) ---
-        # ... (Keep except blocks the same) ...
+                def check(reaction, user):
+                    return user == ctx.author and reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"]
 
-    # --- Error Handler (Keep the same) ---
+                while True:
+                    can_manage_reactions = ctx.guild.me.permissions_in(ctx.channel).manage_messages
+                    try:
+                        reaction, user = await self.bot.wait_for('reaction_add', timeout=60.0, check=check)
+                        page_changed = False
+                        if str(reaction.emoji) == "⬅️" and current_page > 1:
+                            current_page -= 1
+                            page_changed = True
+                        elif str(reaction.emoji) == "➡️" and current_page < total_pages:
+                            current_page += 1
+                            page_changed = True
+
+                        if page_changed:
+                            await message.edit(embed=get_page_embed(current_page))
+
+                        if can_manage_reactions:
+                             try:
+                                 await message.remove_reaction(reaction.emoji, user)
+                             except (discord.Forbidden, discord.NotFound): pass # Ignore if removal fails
+                    except asyncio.TimeoutError:
+                        if can_manage_reactions and message: # Check message exists
+                            try: await message.clear_reactions()
+                            except (discord.Forbidden, discord.NotFound, discord.HTTPException): pass
+                        break
+                    except discord.HTTPException as e:
+                        print(f"ERROR: HTTPException during pagination: {e}")
+                        break
+                    except Exception as e:
+                         print(f"ERROR: Unexpected error in pagination loop: {e}")
+                         traceback.print_exc()
+                         break
+
+        # --- Exception Handling ---
+        except discord.Forbidden as e:
+            await ctx.send(f"I lack permissions for this command. Error: {e.text}")
+        except discord.HTTPException as e:
+            await ctx.send(f"An error occurred while communicating with Discord: {e}")
+        except ConnectionError as e:
+             await ctx.send(f"Database error: {e}")
+        except Exception as e:
+            await ctx.send(f"An unexpected error occurred. Check logs for details.")
+            print(f"ERROR: Unexpected error in moderationhistory command: {e}")
+            traceback.print_exc()
+
+    # --- Error Handler (CORRECTED INDENTATION) ---
     @moderationhistory.error
     async def moderationhistory_error(self, ctx, error):
-        # ... (Keep the same) ...
+        """ Error handler for the moderationhistory command. """
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("You need the 'Manage Messages' permission to use this command.")
+        elif isinstance(error, commands.MemberNotFound):
+            await ctx.send(f"Member not found. Please provide a valid member mention or ID.")
+        elif isinstance(error, commands.CommandInvokeError):
+            original_error = error.original
+            print(f"ERROR: CommandInvokeError in moderationhistory: {original_error}") # Log original error
+            traceback.print_exc() # Print full traceback for debugging
+            if isinstance(original_error, ConnectionError):
+                 await ctx.send(f"Database connection error: {original_error}")
+            elif isinstance(original_error, discord.Forbidden):
+                 # Give more specific feedback if possible from original_error.text
+                 await ctx.send(f"I lack permissions for a required action: {original_error.text}")
+            else:
+                # Generic message for other internal errors
+                await ctx.send("An internal error occurred while executing the command. Please check the bot logs.")
+        else:
+             # Handle other potential errors like BadArgument etc.
+             await ctx.send(f"An error occurred: {error}")
 
 
-# Setup function (Keep the same)
+# Setup function (Correct Indentation)
 async def setup(bot):
     await bot.add_cog(ModerationHistory(bot))
