@@ -125,7 +125,7 @@ class ModerationHistory(commands.Cog):
                 conn.close()
 
 
-    @commands.command(name="moderationhistory", aliases=["modhist"])
+    @commands.command(name="moderationhistory", aliases=["mh"])
     @commands.has_permissions(manage_messages=True)
     async def moderationhistory(self, ctx, *, member: discord.Member):
         """Views moderation actions performed BY the specified staff member."""
