@@ -103,7 +103,7 @@
 
 ### `.moderationhistory <member>`
 
-* **Alias:** `.modhist`
+* **Alias:** `.mh`
 * **Description:** View moderation actions *performed by* a specific staff member.
 * **Usage:** `.moderationhistory @Moderator` or `.modhist @Moderator`
 * **Permissions:** Manage Messages
