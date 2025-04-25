@@ -3,7 +3,7 @@ from discord.ext import commands
 import os
 import asyncio
 import traceback
-from custom_context import EmbedContext  # import the custom context
+from custom_context.py import EmbedContext  # import the custom context
 
 # Initialize bot with . prefix, intents, and no default help command
 intents = discord.Intents.default()
