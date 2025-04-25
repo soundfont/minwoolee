@@ -3,12 +3,15 @@ from discord.ext import commands
 import os
 import asyncio
 import traceback
+from custom_context import EmbedContext  # import the custom context
 
 # Initialize bot with . prefix, intents, and no default help command
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = commands.Bot(command_prefix='.', intents=intents, help_command=None)
+
+# Use the custom EmbedContext class
+bot = commands.Bot(command_prefix='.', intents=intents, help_command=None, context_class=EmbedContext)
 
 # Load cogs
 async def load_cogs():
