@@ -1,10 +1,11 @@
 import discord
 from discord.ext import commands
-import asyncio # For potentially adding reactions sequentially if needed
+import asyncio # For adding delays
 
 class YesNoReactor(commands.Cog):
     """
-    A cog that reacts to messages containing "y/n" with up and down arrows.
+    A cog that reacts to messages containing "y/n" with up and down arrows,
+    ensuring the up arrow is processed first.
     """
     def __init__(self, bot: commands.Bot):
         """
@@ -19,6 +20,7 @@ class YesNoReactor(commands.Cog):
     async def on_message(self, message: discord.Message):
         """
         Listens for new messages and reacts if they contain "y/n".
+        Adds an up arrow, then a small delay, then a down arrow.
 
         Args:
             message: The discord.Message object representing the new message.
@@ -34,11 +36,17 @@ class YesNoReactor(commands.Cog):
             down_arrow = "⬇️" # Unicode: \U00002B07
 
             try:
-                # Add the reactions to the message
-                # Adding them sequentially can sometimes be more reliable
-                # and helps if you want to ensure a specific order.
+                # Add the up arrow reaction
                 await message.add_reaction(up_arrow)
+                
+                # Add a very small delay to help ensure Discord processes them in order
+                # A zero-second sleep yields control to the event loop,
+                # a slightly longer one like 0.1s can be used if needed.
+                await asyncio.sleep(0.1) # 100 milliseconds delay
+                
+                # Add the down arrow reaction
                 await message.add_reaction(down_arrow)
+                
                 print(f"Reacted to message ID {message.id} from {message.author.name} containing 'y/n'.")
 
             except discord.Forbidden:
