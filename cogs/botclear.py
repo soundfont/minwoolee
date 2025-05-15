@@ -17,7 +17,7 @@ class ClearBot(commands.Cog):
     async def bot_clear(self, ctx: commands.Context, limit: int = 100):
         """
         Clears bot commands and bot messages from the current channel.
-        Scans up to 'limit' recent messages (default 100, max usually around 100-200 for practical use).
+        Scans up to 'limit' recent messages (default 100).
         Usage: .bc [number_of_messages_to_scan]
         Example: .bc 50
         """
@@ -25,55 +25,51 @@ class ClearBot(commands.Cog):
             await ctx.send("Please provide a positive number for the limit.")
             return
         
-        # Discord's purge limit is effectively 100 messages at a time for bulk delete.
-        # While history can fetch more, deleting more than 100 in one go via delete_messages isn't allowed.
-        # channel.purge handles this by potentially making multiple calls if needed, but check functions are applied per message.
-        # For simplicity and to avoid hitting API limits too hard, we'll keep the practical limit reasonable.
-        # Let's process in chunks if limit > 100, or just cap it for this command's typical use case.
-        # For now, we'll use the provided limit directly with channel.purge, which is efficient.
+        # Attempt to delete the command message itself first
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            print(f"ClearBot: Could not delete command message in {ctx.channel.name} - Missing Permissions.")
+        except discord.HTTPException as e:
+            print(f"ClearBot: Failed to delete command message in {ctx.channel.name} - HTTPException: {e}")
 
-        await ctx.message.delete() # Delete the command message itself
 
         def is_bot_related(message: discord.Message) -> bool:
             # Check if the message is from the bot itself
             if message.author == self.bot.user:
                 return True
-            # Check if the message starts with the bot's command prefix
-            if message.content.startswith(self.bot.command_prefix):
-                return True
+            # Check if the message starts with any of the bot's command prefixes
+            # self.bot.command_prefix can be a string or an iterable of strings
+            if isinstance(self.bot.command_prefix, str):
+                if message.content.startswith(self.bot.command_prefix):
+                    return True
+            elif callable(self.bot.command_prefix):
+                # If command_prefix is a callable, this check becomes more complex
+                # For simplicity, we'll assume it's a string or list/tuple for this check.
+                # A more robust solution would involve trying to get the prefix for the message.
+                pass # Cannot easily check callable prefix here without more context
+            else: # It's an iterable of prefixes
+                for prefix in self.bot.command_prefix:
+                    if message.content.startswith(prefix):
+                        return True
             return False
 
         try:
-            # The purge command automatically handles messages older than 14 days (it can't delete them).
-            # It also handles bulk deletion efficiently.
             deleted_messages = await ctx.channel.purge(limit=limit, check=is_bot_related, bulk=True)
             
             deleted_count = len(deleted_messages)
-            confirmation_message = f"🧹 Cleared {deleted_count} bot-related message(s) from the last {limit} scanned messages."
+            confirmation_message_text = f"🧹 Cleared {deleted_count} bot-related message(s) from the last {limit} scanned messages."
             
-            # Send confirmation and log to ModLog
-            utils_cog = self.bot.get_cog('Utils')
-            modlog_cog = self.bot.get_cog('ModLog')
+            # Send confirmation
+            utils_cog = self.bot.get_cog('Utils') # Assumes you have a Utils cog for embeds
 
             if utils_cog:
-                embed = utils_cog.create_embed(ctx, title="Bot Messages Cleared", description=confirmation_message, color=discord.Color.light_grey())
+                embed = utils_cog.create_embed(ctx, title="Bot Messages Cleared", description=confirmation_message_text, color=discord.Color.light_grey())
                 await ctx.send(embed=embed, delete_after=10)
-            else:
-                await ctx.send(confirmation_message, delete_after=10)
+            else: # Fallback if Utils cog is not available
+                await ctx.send(confirmation_message_text, delete_after=10)
 
-            if modlog_cog:
-                await modlog_cog.log_moderation_action(
-                    guild=ctx.guild,
-                    action_title="Bot-Related Messages Cleared",
-                    target_user=ctx.channel, # Target is effectively the channel
-                    moderator=ctx.author,
-                    reason=f"Used .bc command in {ctx.channel.mention}",
-                    fields=[
-                        ("Messages Scanned", str(limit)),
-                        ("Messages Deleted", str(deleted_count))
-                    ],
-                    color=discord.Color.light_grey()
-                )
+            # Logging to ModLog has been removed as per request.
 
         except discord.Forbidden:
             await ctx.send("I don't have the required 'Manage Messages' permission to clear messages here.")
@@ -100,4 +96,5 @@ class ClearBot(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(ClearBot(bot))
-    print("Cog 'ClearBot' loaded successfully.")
+    print("Cog 'ClearBot' (without ModLog) loaded successfully.")
+
