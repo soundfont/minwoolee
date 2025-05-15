@@ -7,8 +7,8 @@
 ## Features
 
 * **Command Prefix:** `.`
-* **Moderation Tools:** Kick, ban, timeout, purge messages, view/manage moderation history.
-* **Utility Tools:** Display counts of humans, bots, and total members.
+* **Moderation Tools:** Kick, ban, unban, timeout, untimeout, mute, unmute, purge messages, view/manage moderation history, list bans, clear bot messages.
+* **Utility Tools:** Display counts of humans, bots, and total members, AFK status, snipe deleted messages.
 * **Clean Embeds:** All embed messages display the server icon (if available) as a thumbnail for consistent branding.
 
 ## Command Reference
@@ -21,27 +21,11 @@
 
 ---
 
-### `.ping`
+### `.afk [reason|off]`
 
-* **Description:** Shows the bot's latency in milliseconds.
-* **Usage:** `.ping`
+* **Description:** Sets your status to AFK (Away From Keyboard). Typing `off` as the reason will remove your AFK status.
+* **Usage:** `.afk Taking a break` or `.afk off`
 * **Permissions:** None
-
----
-
-### `.purge <amount>`
-
-* **Description:** Deletes a specified number of messages (1–100).
-* **Usage:** `.purge 25`
-* **Permissions:** Manage Messages
-
----
-
-### `.kick <@user> [reason]`
-
-* **Description:** Kicks a member from the server.
-* **Usage:** `.kick @User Spamming`
-* **Permissions:** Kick Members
 
 ---
 
@@ -53,18 +37,27 @@
 
 ---
 
-### `.timeout <@user> <minutes> [reason]`
+### `.bans`
 
-* **Description:** Temporarily times out a member (max 28 days).
-* **Usage:** `.timeout @User 30 Being disruptive`
-* **Permissions:** Moderate Members
+* **Description:** Displays a paginated list of all users currently banned from the server.
+* **Usage:** `.bans`
+* **Permissions:** Ban Members
 
 ---
 
-### `.membercount`
+### `.bc [limit]`
 
-* **Description:** Displays the number of human members, bots, and total users in an embed.
-* **Usage:** `.membercount`
+* **Alias:** `.botclear`
+* **Description:** Clears bot commands and bot messages from the current channel. Scans up to 'limit' recent messages (default 100).
+* **Usage:** `.bc 50` or `.botclear 25`
+* **Permissions:** Manage Messages
+
+---
+
+### `.help`
+
+* **Description:** Provides a link to the bot's documentation.
+* **Usage:** `.help`
 * **Permissions:** None
 
 ---
@@ -101,12 +94,104 @@
 
 ---
 
+### `.kick <@user> [reason]`
+
+* **Description:** Kicks a member from the server.
+* **Usage:** `.kick @User Spamming`
+* **Permissions:** Kick Members
+
+---
+
+### `.membercount`
+
+* **Alias:** `.mc`
+* **Description:** Displays the number of human members, bots, and total users in an embed.
+* **Usage:** `.membercount`
+* **Permissions:** None
+
+---
+
 ### `.moderationhistory <member>`
 
 * **Alias:** `.mh`
 * **Description:** View moderation actions *performed by* a specific staff member.
-* **Usage:** `.moderationhistory @Moderator` or `.modhist @Moderator`
+* **Usage:** `.moderationhistory @Moderator` or `.mh @Moderator`
 * **Permissions:** Manage Messages
+
+---
+
+### `.mute <@member/ID> [reason]`
+
+* **Description:** Assigns a "Muted" role to a member, restricting them from sending images and adding reactions.
+* **Usage:** `.mute @User Repeatedly breaking rules`
+* **Permissions:** Moderate Members
+
+---
+
+### `.mutedlist`
+
+* **Description:** Displays a list of members who currently have the "Muted" role.
+* **Usage:** `.mutedlist`
+* **Permissions:** Manage Messages
+
+---
+
+### `.ping`
+
+* **Description:** Shows the bot's latency in milliseconds.
+* **Usage:** `.ping`
+* **Permissions:** None
+
+---
+
+### `.purge <amount>`
+
+* **Description:** Deletes a specified number of messages (1–100).
+* **Usage:** `.purge 25`
+* **Permissions:** Manage Messages
+
+---
+
+### `.snipe [index]`
+
+* **Alias:** `.s`
+* **Description:** Shows the last deleted message(s) in the channel (up to 10, within the last 2 hours). Use an index to view older snipes (e.g., `.snipe 2` for the second to last).
+* **Usage:** `.snipe` or `.s 3`
+* **Permissions:** None
+
+---
+
+### `.timeout <@user> <duration> [reason]`
+
+* **Alias:** `.to`
+* **Description:** Temporarily times out a member. Duration can be specified in weeks (w), days (d), hours (h), minutes (m), and seconds (s) (e.g., "1w2d3h4m5s", "30m", "1d 12h"). Max 28 days.
+* **Usage:** `.timeout @User 30m Being disruptive` or `.to @User "1d 12h" Repeated warnings`
+* **Permissions:** Moderate Members
+
+---
+
+### `.unban <user> [reason]`
+
+* **Description:** Unbans a user from the server.
+* **Usage:** `.unban UserID#1234 Appealed successfully` or `.unban @User Reason for unban`
+* **Permissions:** Ban Members
+
+---
+
+### `.unmute <@member/ID> [reason]`
+
+* **Description:** Removes the "Muted" role from a member.
+* **Usage:** `.unmute @User Mute expired`
+* **Permissions:** Moderate Members
+
+---
+
+### `.untimeout <member> [reason]`
+
+* **Alias:** `.uto`
+* **Description:** Removes an active timeout from a member.
+* **Usage:** `.untimeout @User Appealed` or `.uto @User Behavior improved`
+* **Permissions:** Moderate Members
 
 ---
 
