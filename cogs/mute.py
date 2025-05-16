@@ -2,361 +2,289 @@ import discord
 from discord.ext import commands
 import traceback
 
-# Configuration: The name of the role to be used for muting.
-# This role will restrict sending images/embeds and adding reactions.
-MUTE_ROLE_NAME = "Muted"
+# --- Configuration ---
+MEDIA_MUTE_ROLE_NAME = "Media Muted"  # << CHANGED ROLE NAME HERE
+# Permissions to DENY for the Media Muted role (both server-level and in channel overwrites)
+PERMISSIONS_TO_DENY = {
+    "attach_files": False,
+    "embed_links": False,
+    "add_reactions": False,
+    "use_external_emojis": False,
+    # Consider also denying message sending if you want a full text + media mute.
+    # "send_messages": False,
+    # "send_messages_in_threads": False,
+}
 
 class Mute(commands.Cog):
     """
-    A cog to prevent specified users from sending images and adding reactions
-    by assigning/removing a designated 'Muted' role.
-    This version robustly applies channel-level DENY overwrites for the Muted role
-    to counteract other roles (like a 'Trusted' role) that might grant these permissions.
+    Manages a role-based mute specifically for restricting media (images, embeds)
+    and reactions. It ensures the 'Media Muted' role has the correct server permissions
+    and applies channel-specific overwrites for maximum effectiveness.
     """
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def _apply_channel_overwrites(self, guild: discord.Guild, mute_role: discord.Role):
+    async def _ensure_media_mute_role_setup(self, guild: discord.Guild) -> discord.Role | None:
         """
-        Applies specific permission overwrites for the mute_role in all text channels.
-        This is crucial for overriding other roles that might grant these permissions.
+        Ensures the 'Media Muted' role exists, has correct server-level permissions,
+        and applies necessary channel overwrites.
+        Returns the 'Media Muted' role object, or None if setup fails.
         """
-        # Permissions to explicitly DENY in channels for the Muted role
-        overwrite_settings = {
-            "attach_files": False,
-            "embed_links": False,
-            "add_reactions": False,
-            "use_external_emojis": False
-        }
-        overwrite = discord.PermissionOverwrite(**overwrite_settings)
+        media_mute_role = discord.utils.get(guild.roles, name=MEDIA_MUTE_ROLE_NAME)
 
-        successful_overwrites = 0
-        failed_overwrites = 0
-        skipped_channels = 0
+        # 1. Define desired server-level permissions for the 'Media Muted' role
+        desired_server_permissions = guild.default_role.permissions # Start with @everyone perms
+        desired_server_permissions.update(**PERMISSIONS_TO_DENY)
 
-        print(f"Starting to apply/verify channel overwrites for '{MUTE_ROLE_NAME}' in guild '{guild.name}'...")
-        for channel in guild.text_channels: # Iterate through all text channels
+        if media_mute_role:
+            # 1a. If role exists, check and update its server-level permissions if needed
+            if media_mute_role.permissions != desired_server_permissions:
+                print(f"'{MEDIA_MUTE_ROLE_NAME}' in '{guild.name}': Server permissions differ. Updating...")
+                try:
+                    await media_mute_role.edit(
+                        permissions=desired_server_permissions,
+                        reason=f"Ensuring '{MEDIA_MUTE_ROLE_NAME}' has correct server-level permissions."
+                    )
+                    print(f"'{MEDIA_MUTE_ROLE_NAME}' in '{guild.name}': Server permissions updated.")
+                except discord.Forbidden:
+                    print(f"'{MEDIA_MUTE_ROLE_NAME}' in '{guild.name}': Bot lacks permission to edit role (server perms).")
+                except discord.HTTPException as e:
+                    print(f"'{MEDIA_MUTE_ROLE_NAME}' in '{guild.name}': HTTP error updating server permissions: {e}")
+                except Exception as e:
+                    print(f"'{MEDIA_MUTE_ROLE_NAME}' in '{guild.name}': Unexpected error updating server permissions: {e}")
+                    traceback.print_exc()
+        else:
+            # 1b. If role doesn't exist, create it with desired server-level permissions
+            print(f"'{MEDIA_MUTE_ROLE_NAME}' not found in '{guild.name}'. Attempting to create...")
             try:
-                bot_channel_permissions = channel.permissions_for(guild.me)
-                
-                # Bot needs 'Manage Roles' (which implies manage permissions for roles) in the channel
-                if bot_channel_permissions.manage_roles:
-                    current_overwrite = channel.overwrites_for(mute_role)
-                    
-                    # Check if an update is actually needed
-                    needs_update = False
-                    for perm, value in overwrite_settings.items():
-                        if getattr(current_overwrite, perm) != value:
-                            needs_update = True
-                            break
+                media_mute_role = await guild.create_role(
+                    name=MEDIA_MUTE_ROLE_NAME,
+                    permissions=desired_server_permissions,
+                    reason=f"Creating '{MEDIA_MUTE_ROLE_NAME}' for media/reaction restrictions."
+                )
+                print(f"'{MEDIA_MUTE_ROLE_NAME}' created in '{guild.name}'.")
+                if guild.system_channel and guild.me.permissions_in(guild.system_channel).send_messages:
+                    await guild.system_channel.send(
+                        f"The '{MEDIA_MUTE_ROLE_NAME}' role has been automatically created/configured. "
+                        "Please review its position in the role hierarchy."
+                    )
+            except discord.Forbidden:
+                print(f"'{MEDIA_MUTE_ROLE_NAME}' in '{guild.name}': Bot lacks 'Manage Roles' to create role.")
+                return None
+            except discord.HTTPException as e:
+                print(f"'{MEDIA_MUTE_ROLE_NAME}' in '{guild.name}': HTTP error creating role: {e}")
+                return None
+            except Exception as e:
+                print(f"'{MEDIA_MUTE_ROLE_NAME}' in '{guild.name}': Unexpected error creating role: {e}")
+                traceback.print_exc()
+                return None
+
+        if not media_mute_role:
+            return None
+
+        # 2. Apply/Verify channel-specific overwrites for the 'Media Muted' role
+        overwrite_for_channels = discord.PermissionOverwrite(**PERMISSIONS_TO_DENY)
+        
+        print(f"'{MEDIA_MUTE_ROLE_NAME}' in '{guild.name}': Applying/verifying channel overwrites...")
+        processed_channels = 0
+        for channel in guild.text_channels:
+            try:
+                if channel.permissions_for(guild.me).manage_roles:
+                    current_channel_overwrite = channel.overwrites_for(media_mute_role)
+                    needs_update = any(getattr(current_channel_overwrite, perm_name) != perm_value for perm_name, perm_value in PERMISSIONS_TO_DENY.items())
                     
                     if needs_update:
                         await channel.set_permissions(
-                            mute_role, 
-                            overwrite=overwrite, 
-                            reason=f"Enforcing '{MUTE_ROLE_NAME}' role restrictions"
+                            media_mute_role,
+                            overwrite=overwrite_for_channels,
+                            reason=f"Enforcing '{MEDIA_MUTE_ROLE_NAME}' restrictions in channel."
                         )
-                        print(f"Applied/Updated '{MUTE_ROLE_NAME}' overwrites for channel: #{channel.name}")
-                        successful_overwrites +=1
-                    else:
-                        # print(f"'{MUTE_ROLE_NAME}' overwrites already correct for channel: #{channel.name}")
-                        successful_overwrites +=1 # Count as success if already correct
+                    processed_channels += 1
                 else:
-                    print(f"Skipping channel #{channel.name}: Bot lacks 'Manage Roles' permission in this channel.")
-                    skipped_channels += 1
+                    print(f"Skipping channel #{channel.name} for '{MEDIA_MUTE_ROLE_NAME}' overwrites: Bot lacks Manage Roles permission there.")
             except discord.Forbidden:
-                print(f"Forbidden: Could not set permission overwrites for '{MUTE_ROLE_NAME}' in channel #{channel.name}.")
-                failed_overwrites += 1
+                print(f"Forbidden to set overwrites for '{MEDIA_MUTE_ROLE_NAME}' in channel #{channel.name}.")
             except discord.HTTPException as e:
-                print(f"HTTPException: Failed to set permission overwrites for '{MUTE_ROLE_NAME}' in channel #{channel.name}: {e}")
-                failed_overwrites += 1
+                print(f"HTTP error setting overwrites for '{MEDIA_MUTE_ROLE_NAME}' in #{channel.name}: {e}")
             except Exception as e:
-                print(f"Unexpected error applying channel overwrites in #{channel.name} for guild '{guild.name}': {e}")
+                print(f"Unexpected error with channel overwrites for '{MEDIA_MUTE_ROLE_NAME}' in #{channel.name}: {e}")
                 traceback.print_exc()
-                failed_overwrites += 1
         
-        print(f"'{MUTE_ROLE_NAME}' channel overwrite summary for guild '{guild.name}': "
-              f"{successful_overwrites} processed (applied/verified), {failed_overwrites} failed, {skipped_channels} skipped.")
+        print(f"'{MEDIA_MUTE_ROLE_NAME}' in '{guild.name}': Channel overwrite process completed for {processed_channels} text channels.")
+        return media_mute_role
 
-    async def _get_or_create_mute_role(self, guild: discord.Guild) -> discord.Role | None:
-        """
-        Gets the mute role by name. If it doesn't exist, creates it
-        with appropriate server-level permissions denied.
-        If it exists, ensures its server-level permissions are correct.
-        Then, applies necessary channel overwrites.
-        """
-        mute_role = discord.utils.get(guild.roles, name=MUTE_ROLE_NAME)
-        
-        desired_server_perms = discord.Permissions.none()
-        desired_server_perms.update(
-            attach_files=False,
-            embed_links=False,
-            add_reactions=False,
-            use_external_emojis=False
-        )
-
-        if mute_role:
-            print(f"Found existing '{MUTE_ROLE_NAME}' role in guild '{guild.name}' (ID: {guild.id}).")
-            if mute_role.permissions != desired_server_perms:
-                print(f"Existing '{MUTE_ROLE_NAME}' role has different server permissions. Attempting to update...")
-                try:
-                    await mute_role.edit(
-                        permissions=desired_server_perms, 
-                        reason=f"Ensuring '{MUTE_ROLE_NAME}' role has correct server permissions."
-                    )
-                    print(f"Successfully updated server permissions for '{MUTE_ROLE_NAME}' role.")
-                except discord.Forbidden:
-                    print(f"Error: Bot lacks 'Manage Roles' permission to update the '{MUTE_ROLE_NAME}' role's server permissions.")
-                except discord.HTTPException as e:
-                    print(f"Error: Failed to update '{MUTE_ROLE_NAME}' role's server permissions. HTTPException: {e}")
-                except Exception as e:
-                    print(f"An unexpected error occurred while updating mute role server permissions: {e}")
-                    traceback.print_exc()
-        else:
-            print(f"'{MUTE_ROLE_NAME}' role not found in '{guild.name}'. Attempting to create...")
-            try:
-                mute_role = await guild.create_role(
-                    name=MUTE_ROLE_NAME,
-                    permissions=desired_server_perms,
-                    reason=f"Creating '{MUTE_ROLE_NAME}' role for media/reaction mute functionality."
-                )
-                print(f"Successfully created '{MUTE_ROLE_NAME}' role (ID: {mute_role.id}).")
-                if guild.system_channel and guild.me.permissions_in(guild.system_channel).send_messages:
-                    try:
-                        await guild.system_channel.send(
-                            f"The '{MUTE_ROLE_NAME}' role has been automatically created/configured for restricting images and reactions. "
-                            f"Please ensure it's positioned correctly in your role hierarchy."
-                        )
-                    except discord.Forbidden:
-                        print(f"Could not send role creation notification to system channel in '{guild.name}'.")
-            except discord.Forbidden:
-                print(f"Error: Bot lacks 'Manage Roles' permission to create the '{MUTE_ROLE_NAME}' role.")
-                return None
-            except discord.HTTPException as e:
-                print(f"Error: Failed to create '{MUTE_ROLE_NAME}' role. HTTPException: {e}")
-                return None
-            except Exception as e:
-                print(f"An unexpected error occurred while creating mute role: {e}")
-                traceback.print_exc()
-                return None
-
-        if mute_role:
-            await self._apply_channel_overwrites(guild, mute_role)
-            return mute_role
-        
-        return None
-
-    @commands.command(name="mute")
+    @commands.command(name="mute") # You might want to rename this command too, e.g., "mediamute"
     @commands.has_permissions(moderate_members=True)
-    @commands.bot_has_permissions(manage_roles=True) # manage_roles is sufficient for channel.set_permissions on a role
+    @commands.bot_has_permissions(manage_roles=True)
     async def mute_command(self, ctx: commands.Context, member: discord.Member, *, reason: str = "Not specified"):
+        """
+        Mutes a member by restricting media/reactions using the 'Media Muted' role.
+        Usage: .mute <@member/ID> [reason]
+        """
         utils_cog = self.bot.get_cog('Utils')
         if not utils_cog:
-            # It's better to use the custom context's send if available
-            await ctx.send("Error: Utils cog not loaded. Cannot create embed.")
+            await ctx.send("Error: Utils cog is not loaded, cannot create embeds.")
             return
 
-        mute_role = await self._get_or_create_mute_role(ctx.guild)
-        if not mute_role:
+        media_mute_role = await self._ensure_media_mute_role_setup(ctx.guild)
+        if not media_mute_role:
             await ctx.send(embed=utils_cog.create_embed(ctx, title="Mute Failed",
-                                                       description=(
-                                                           f"The '{MUTE_ROLE_NAME}' role is not available and could not be created/configured. "
-                                                           "Please ensure I have 'Manage Roles' permission server-wide and in relevant channels, "
-                                                           "and my role is positioned high enough."
-                                                        ),
+                                                       description=f"The '{MEDIA_MUTE_ROLE_NAME}' role could not be properly configured. "
+                                                                   "Check bot permissions ('Manage Roles' server-wide and for channels) "
+                                                                   "and console logs for details.",
                                                        color=discord.Color.red()))
             return
 
-        # Standard checks (self-mute, bot mute, hierarchy)
+        # Standard Checks
+        if member.id == ctx.guild.owner_id:
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Error", description="The server owner cannot be muted.", color=discord.Color.red()))
+            return
         if member.id == ctx.author.id and ctx.guild.owner_id != ctx.author.id:
             await ctx.send(embed=utils_cog.create_embed(ctx, title="Error", description="You cannot mute yourself.", color=discord.Color.red()))
             return
         if member.bot:
-            await ctx.send(embed=utils_cog.create_embed(ctx, title="Error", description="You cannot mute a bot.", color=discord.Color.red()))
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Error", description="Bots cannot be muted with this command.", color=discord.Color.red()))
             return
         if member.top_role >= ctx.author.top_role and ctx.guild.owner_id != ctx.author.id:
-            await ctx.send(embed=utils_cog.create_embed(ctx, title="Permission Denied", description="You cannot mute a member with a role higher than or equal to yours.", color=discord.Color.red()))
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Hierarchy Error", description="You cannot mute a member with a role equal to or higher than yours.", color=discord.Color.red()))
             return
-        if mute_role >= ctx.guild.me.top_role:
-            await ctx.send(embed=utils_cog.create_embed(ctx, title="Hierarchy Error", description=f"I cannot assign or manage the '{MUTE_ROLE_NAME}' role as it is higher than or equal to my highest role. Please adjust role positions.", color=discord.Color.red()))
+        if media_mute_role >= ctx.guild.me.top_role:
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Hierarchy Error", description=f"My role is not high enough to assign or manage the '{MEDIA_MUTE_ROLE_NAME}' role.", color=discord.Color.red()))
             return
-        if member.id != ctx.guild.owner_id and member.top_role >= ctx.guild.me.top_role : # Can't mute owner, and can't mute if their role is higher/equal to bot's
-            await ctx.send(embed=utils_cog.create_embed(ctx, title="Hierarchy Error", description=f"I cannot mute {member.mention} because their role is higher than or equal to mine.", color=discord.Color.red()))
+        if member.top_role >= ctx.guild.me.top_role:
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Hierarchy Error", description=f"I cannot mute {member.mention} as their highest role is equal to or higher than mine.", color=discord.Color.red()))
             return
-        if member.id == ctx.guild.owner_id: # Explicitly prevent muting the owner
-             await ctx.send(embed=utils_cog.create_embed(ctx, title="Error", description="The server owner cannot be muted.", color=discord.Color.red()))
-             return
 
-
-        if mute_role in member.roles:
-            print(f"User {member.display_name} already has '{MUTE_ROLE_NAME}'. Re-verifying channel overwrites.")
-            await self._apply_channel_overwrites(ctx.guild, mute_role) # Re-verify just in case
-            embed = utils_cog.create_embed(ctx, title="Already Muted", 
-                                           description=f"{member.mention} already has the '{MUTE_ROLE_NAME}' role. Channel permissions re-verified.", 
-                                           color=discord.Color.orange())
-            await ctx.send(embed=embed)
+        if media_mute_role in member.roles:
+            print(f"User {member.display_name} already has '{MEDIA_MUTE_ROLE_NAME}'. Re-verifying role/channel setup.")
+            await self._ensure_media_mute_role_setup(ctx.guild) 
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Already Media Muted", description=f"{member.mention} already has the '{MEDIA_MUTE_ROLE_NAME}' role. Permissions re-verified.", color=discord.Color.orange()))
             return
 
         try:
-            await member.add_roles(mute_role, reason=f"Muted by {ctx.author} (ID: {ctx.author.id}) for: {reason}")
-            # _get_or_create_mute_role already calls _apply_channel_overwrites.
-            # No need to call it again here unless debugging a specific timing issue.
-
-            embed = utils_cog.create_embed(ctx, title="Mute Applied", 
-                                           description=f"{member.mention} has been assigned the '{MUTE_ROLE_NAME}' role, restricting image sending and reactions.", 
+            await member.add_roles(media_mute_role, reason=f"Media Muted by {ctx.author.display_name} for: {reason}")
+            
+            embed = utils_cog.create_embed(ctx, title="Member Media Muted",
+                                           description=f"{member.mention} has been '{MEDIA_MUTE_ROLE_NAME}', restricting media and reactions.",
                                            color=discord.Color.green())
             embed.add_field(name="Reason", value=reason, inline=False)
             await ctx.send(embed=embed)
 
             history_cog = self.bot.get_cog('History')
             if history_cog:
-                history_cog.log_action(ctx.guild.id, member.id, f"Muted (Role: {MUTE_ROLE_NAME})", ctx.author, reason)
+                history_cog.log_action(ctx.guild.id, member.id, f"Media Muted (Role: {MEDIA_MUTE_ROLE_NAME})", ctx.author, reason)
+
         except discord.Forbidden:
-            await ctx.send(embed=utils_cog.create_embed(ctx, title="Permissions Error", description="I failed to assign the mute role. This is likely due to a role hierarchy issue or missing 'Manage Roles' permission.", color=discord.Color.red()))
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Permissions Error", description=f"Failed to assign the '{MEDIA_MUTE_ROLE_NAME}' role.", color=discord.Color.red()))
         except discord.HTTPException as e:
-            await ctx.send(embed=utils_cog.create_embed(ctx, title="API Error", description=f"An error occurred while trying to assign the mute role: {e}", color=discord.Color.red()))
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="API Error", description=f"An error occurred while applying media mute: {e}", color=discord.Color.red()))
         except Exception as e:
             traceback.print_exc()
-            await ctx.send(embed=utils_cog.create_embed(ctx, title="Unexpected Error", description="An unexpected error occurred during mute.", color=discord.Color.red()))
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Unexpected Mute Error", description=f"An unexpected error occurred: {e}", color=discord.Color.red()))
 
-    @commands.command(name="unmute")
+    @commands.command(name="unmute") # You might want to rename this command too, e.g., "unmediamute"
     @commands.has_permissions(moderate_members=True)
     @commands.bot_has_permissions(manage_roles=True)
     async def un_mute_command(self, ctx: commands.Context, member: discord.Member, *, reason: str = "Not specified"):
+        """
+        Unmutes a member by removing the 'Media Muted' role.
+        Usage: .unmute <@member/ID> [reason]
+        """
         utils_cog = self.bot.get_cog('Utils')
         if not utils_cog:
-            await ctx.send("Error: Utils cog not loaded. Cannot create embed.")
+            await ctx.send("Error: Utils cog is not loaded.")
             return
 
-        mute_role = discord.utils.get(ctx.guild.roles, name=MUTE_ROLE_NAME)
-        if not mute_role: 
-            await ctx.send(embed=utils_cog.create_embed(ctx, title="Unmute Failed",
-                                                       description=f"The '{MUTE_ROLE_NAME}' role is not available in this server. Cannot unmute.",
-                                                       color=discord.Color.red()))
+        media_mute_role = discord.utils.get(ctx.guild.roles, name=MEDIA_MUTE_ROLE_NAME)
+        if not media_mute_role:
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Unmute Failed", description=f"The '{MEDIA_MUTE_ROLE_NAME}' role doesn't exist.", color=discord.Color.red()))
             return
         
-        if mute_role >= ctx.guild.me.top_role:
-            await ctx.send(embed=utils_cog.create_embed(ctx, title="Hierarchy Error", description=f"I cannot remove the '{MUTE_ROLE_NAME}' role as it is higher than or equal to my highest role.", color=discord.Color.red()))
+        if media_mute_role not in member.roles:
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Not Media Muted", description=f"{member.mention} does not have the '{MEDIA_MUTE_ROLE_NAME}' role.", color=discord.Color.orange()))
             return
 
-        if mute_role not in member.roles:
-            embed = utils_cog.create_embed(ctx, title="Not Muted", description=f"{member.mention} does not have the '{MUTE_ROLE_NAME}' role.", color=discord.Color.orange())
-            await ctx.send(embed=embed)
+        if media_mute_role >= ctx.guild.me.top_role:
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Hierarchy Error", description=f"My role is not high enough to remove the '{MEDIA_MUTE_ROLE_NAME}' role.", color=discord.Color.red()))
             return
-
+            
         try:
-            await member.remove_roles(mute_role, reason=f"Unmuted by {ctx.author} (ID: {ctx.author.id}) for: {reason}")
-            embed = utils_cog.create_embed(ctx, title="Mute Removed", 
-                                           description=f"The '{MUTE_ROLE_NAME}' role has been removed from {member.mention}.", 
+            await member.remove_roles(media_mute_role, reason=f"Media Unmuted by {ctx.author.display_name} for: {reason}")
+            embed = utils_cog.create_embed(ctx, title="Member Media Unmuted",
+                                           description=f"{member.mention}'s media/reaction restrictions have been lifted.",
                                            color=discord.Color.green())
             embed.add_field(name="Reason", value=reason, inline=False)
             await ctx.send(embed=embed)
 
             history_cog = self.bot.get_cog('History')
             if history_cog:
-                history_cog.log_action(ctx.guild.id, member.id, f"Unmuted (Role: {MUTE_ROLE_NAME})", ctx.author, reason)
+                history_cog.log_action(ctx.guild.id, member.id, f"Media Unmuted (Role: {MEDIA_MUTE_ROLE_NAME})", ctx.author, reason)
+
         except discord.Forbidden:
-            await ctx.send(embed=utils_cog.create_embed(ctx, title="Permissions Error", description="I failed to remove the mute role. This might be due to a role hierarchy issue or missing 'Manage Roles' permission.", color=discord.Color.red()))
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Permissions Error", description=f"Failed to remove the '{MEDIA_MUTE_ROLE_NAME}' role.", color=discord.Color.red()))
         except discord.HTTPException as e:
-            await ctx.send(embed=utils_cog.create_embed(ctx, title="API Error", description=f"An error occurred while trying to remove the mute role: {e}", color=discord.Color.red()))
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="API Error", description=f"An error occurred while unmuting: {e}", color=discord.Color.red()))
         except Exception as e:
             traceback.print_exc()
-            await ctx.send(embed=utils_cog.create_embed(ctx, title="Unexpected Error", description="An unexpected error occurred during unmute.", color=discord.Color.red()))
-            
-    @commands.command(name="mutedlist")
-    @commands.has_permissions(manage_messages=True) 
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Unexpected Unmute Error", description=f"An unexpected error occurred: {e}", color=discord.Color.red()))
+
+    @commands.command(name="mutedlist") # Or "mediamutedlist"
+    @commands.has_permissions(manage_messages=True)
     async def muted_list_command(self, ctx: commands.Context):
+        """Displays a list of members who currently have the 'Media Muted' role."""
         utils_cog = self.bot.get_cog('Utils')
-        if not utils_cog:
-            await ctx.send("Error: Utils cog not loaded. Cannot create embed.")
+        if not utils_cog: await ctx.send("Error: Utils cog not loaded."); return
+
+        media_mute_role = discord.utils.get(ctx.guild.roles, name=MEDIA_MUTE_ROLE_NAME)
+        if not media_mute_role:
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Media Muted List", description=f"The '{MEDIA_MUTE_ROLE_NAME}' role does not exist."))
             return
 
-        mute_role = discord.utils.get(ctx.guild.roles, name=MUTE_ROLE_NAME) 
-        if not mute_role:
-            embed = utils_cog.create_embed(ctx, title="Muted List", description=f"The '{MUTE_ROLE_NAME}' role does not exist in this server.")
-            await ctx.send(embed=embed)
+        muted_members = [m for m in ctx.guild.members if media_mute_role in m.roles]
+
+        if not muted_members:
+            await ctx.send(embed=utils_cog.create_embed(ctx, title="Media Muted List", description=f"No members currently have the '{MEDIA_MUTE_ROLE_NAME}' role."))
             return
 
-        muted_members_with_role = [m for m in ctx.guild.members if mute_role in m.roles]
-
-        if not muted_members_with_role:
-            embed = utils_cog.create_embed(ctx, title="Muted List", description=f"No members currently have the '{MUTE_ROLE_NAME}' role.")
-            await ctx.send(embed=embed)
-            return
-
-        description_lines = []
-        for member_obj in muted_members_with_role: 
-            description_lines.append(f"- {member_obj.mention} (ID: {member_obj.id})")
-        
-        embed = utils_cog.create_embed(ctx, title=f"Members with '{MUTE_ROLE_NAME}' Role ({len(muted_members_with_role)})", description="\n".join(description_lines))
+        description = "\n".join([f"- {member.mention} ({member.id})" for member in muted_members])
+        embed = utils_cog.create_embed(ctx, title=f"Members with '{MEDIA_MUTE_ROLE_NAME}' Role ({len(muted_members)})", description=description)
         await ctx.send(embed=embed)
 
+    # --- Error Handlers ---
     @mute_command.error
     async def mute_command_error(self, ctx, error):
         utils_cog = self.bot.get_cog('Utils')
-        error_embed = None
-        if utils_cog: error_embed = utils_cog.create_embed(ctx, title="Mute Error", color=discord.Color.red())
+        embed = utils_cog.create_embed(ctx, title="Media Mute Command Error", color=discord.Color.red()) if utils_cog else None
         
-        desc = f"An unexpected error occurred: {error}" 
-        if isinstance(error, commands.MissingPermissions):
-            desc = "You need 'Moderate Members' permission to use this command."
-        elif isinstance(error, commands.BotMissingPermissions):
-            missing_perms_str = ", ".join(error.missing_permissions)
-            if 'manage_roles' in error.missing_permissions :
-                desc = f"I am missing 'Manage Roles' permission server-wide or in specific channels. This is crucial for the mute command. Missing: `{missing_perms_str}`"
-            else:
-                desc = f"I am missing the following permissions: `{missing_perms_str}`."
-        elif isinstance(error, commands.MemberNotFound):
-            desc = f"Member not found: `{error.argument}`. Please provide a valid member."
-        elif isinstance(error, commands.MissingRequiredArgument):
-            desc = f"Missing argument: `{error.param.name}`.\nUsage: `.mute <@member/ID> [reason]`"
+        if isinstance(error, commands.MissingPermissions): desc = "You need 'Moderate Members' permission."
+        elif isinstance(error, commands.BotMissingPermissions): desc = f"I'm missing 'Manage Roles' permission. (Missing: {', '.join(error.missing_permissions)})"
+        elif isinstance(error, commands.MemberNotFound): desc = f"Member '{error.argument}' not found."
+        elif isinstance(error, commands.MissingRequiredArgument): desc = f"Missing argument: {error.param.name}."
         elif isinstance(error, commands.CommandInvokeError):
-            print(f"CommandInvokeError in mute: {error.original}") 
-            traceback.print_exc()
-            if isinstance(error.original, discord.Forbidden):
-                 desc = "I lack permissions to assign the role or modify channel permissions. This is likely due to role hierarchy or missing 'Manage Roles' server-wide or in specific channels."
-            else:
-                 desc = "An internal error occurred. Please check the bot logs."
-        
-        if error_embed:
-            error_embed.description = desc
-            await ctx.send(embed=error_embed)
-        else:
-            await ctx.send(f"Mute Error: {desc} (Utils cog missing).")
+            print(f"Error in mute_command: {error.original}"); traceback.print_exc()
+            desc = "Internal error during media mute. Check console."
+        else: desc = f"Unexpected error: {error}"
+
+        if embed: embed.description = desc; await ctx.send(embed=embed)
+        else: await ctx.send(f"Media Mute Command Error: {desc}")
 
     @un_mute_command.error
-    async def unmute_command_error(self, ctx, error):
+    async def un_mute_command_error(self, ctx, error):
         utils_cog = self.bot.get_cog('Utils')
-        error_embed = None
-        if utils_cog: error_embed = utils_cog.create_embed(ctx, title="Unmute Error", color=discord.Color.red())
+        embed = utils_cog.create_embed(ctx, title="Media Unmute Command Error", color=discord.Color.red()) if utils_cog else None
 
-        desc = f"An unexpected error occurred: {error}" 
-        if isinstance(error, commands.MissingPermissions):
-            desc = "You need 'Moderate Members' permission to use this command."
-        elif isinstance(error, commands.BotMissingPermissions):
-            missing_perms_str = ", ".join(error.missing_permissions)
-            if 'manage_roles' in error.missing_permissions:
-                desc = f"I am missing the 'Manage Roles' permission. Please grant it to me so I can manage the mute role. Missing: `{missing_perms_str}`"
-            else:
-                desc = f"I am missing the following permissions: `{missing_perms_str}`."
-        elif isinstance(error, commands.MemberNotFound):
-            desc = f"Member not found: `{error.argument}`. Please provide a valid member."
-        elif isinstance(error, commands.MissingRequiredArgument):
-            desc = f"Missing argument: `{error.param.name}`.\nUsage: `.unmute <@member/ID> [reason]`"
+        if isinstance(error, commands.MissingPermissions): desc = "You need 'Moderate Members' permission."
+        elif isinstance(error, commands.BotMissingPermissions): desc = f"I'm missing 'Manage Roles' permission. (Missing: {', '.join(error.missing_permissions)})"
+        elif isinstance(error, commands.MemberNotFound): desc = f"Member '{error.argument}' not found."
+        elif isinstance(error, commands.MissingRequiredArgument): desc = f"Missing argument: {error.param.name}."
         elif isinstance(error, commands.CommandInvokeError):
-            print(f"CommandInvokeError in unmute: {error.original}")
-            traceback.print_exc()
-            if isinstance(error.original, discord.Forbidden):
-                 desc = "I lack permissions to remove the role. This is likely due to role hierarchy (my role is too low)."
-            else:
-                 desc = "An internal error occurred. Please check the bot logs."
-
-        if error_embed:
-            error_embed.description = desc
-            await ctx.send(embed=error_embed)
-        else:
-            await ctx.send(f"Unmute Error: {desc} (Utils cog missing).")
+            print(f"Error in un_mute_command: {error.original}"); traceback.print_exc()
+            desc = "Internal error during media unmute. Check console."
+        else: desc = f"Unexpected error: {error}"
+            
+        if embed: embed.description = desc; await ctx.send(embed=embed)
+        else: await ctx.send(f"Media Unmute Command Error: {desc}")
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Mute(bot))
-    print(f"Cog 'Mute (Role-Based with Enhanced Channel Overwrites)' loaded successfully.")
+    print(f"Cog 'Mute (using {MEDIA_MUTE_ROLE_NAME} role)' loaded.")
