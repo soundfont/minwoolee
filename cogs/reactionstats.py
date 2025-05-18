@@ -70,19 +70,9 @@ class ReactionStats(commands.Cog):
                     UNIQUE (message_id, reactor_id, emoji_unicode, emoji_custom_id)
                 )
             """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_current_reactions_author_time 
-                ON current_reactions (message_author_id, reacted_at);
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_current_reactions_message_id
-                ON current_reactions (message_id);
-            """)
-            # Index for emoji specific queries
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_current_reactions_emoji
-                ON current_reactions (emoji_unicode, emoji_custom_id);
-            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_current_reactions_author_time ON current_reactions (message_author_id, reacted_at);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_current_reactions_message_id ON current_reactions (message_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_current_reactions_emoji ON current_reactions (emoji_unicode, emoji_custom_id);")
             conn.commit()
             cursor.close()
             print("[ReactionStats DEBUG] 'current_reactions' table checked/created.")
@@ -177,7 +167,6 @@ class ReactionStats(commands.Cog):
         finally:
             if conn: cursor.close(); conn.close()
 
-    # --- Helper for User's Top Reactions ---
     async def _fetch_top_reactions_for_user_period(self, guild_id: int, member_id: int, start_time: Optional[datetime.datetime]) -> List[Dict]:
         if not self.db_params: return []
         time_filter_sql = "AND reacted_at >= %s" if start_time else ""
@@ -212,10 +201,14 @@ class ReactionStats(commands.Cog):
             lines.append(f"{i+1}. {emoji_display} - **{row['reaction_count']}**")
         return "\n".join(lines)
 
-    # --- Helper for Emoji Leaderboard ---
     async def _fetch_emoji_leaderboard_for_period(self, guild_id: int, emoji_unicode: Optional[str], emoji_custom_id: Optional[int], start_time: Optional[datetime.datetime]) -> List[Dict]:
         if not self.db_params: return []
         time_filter_sql = "AND reacted_at >= %s" if start_time else ""
+        # Ensure only one of emoji_unicode or emoji_custom_id is used for filtering
+        if emoji_unicode and emoji_custom_id: # Should not happen with current parsing logic
+            print("[ReactionStats DEBUG] Both unicode and custom_id provided to _fetch_emoji_leaderboard. Prioritizing unicode.")
+            emoji_custom_id = None
+        
         emoji_filter_sql = "AND emoji_unicode = %s AND emoji_custom_id IS NULL" if emoji_unicode else "AND emoji_custom_id = %s AND emoji_unicode IS NULL"
         
         conn = None
@@ -232,11 +225,13 @@ class ReactionStats(commands.Cog):
             """
             params = [guild_id]
             if emoji_unicode: params.append(emoji_unicode)
-            else: params.append(emoji_custom_id) # This must be emoji_custom_id
+            elif emoji_custom_id: params.append(emoji_custom_id)
+            else: return [] # No valid emoji identifier provided
+            
             if start_time: params.append(start_time)
             
             cursor.execute(query, tuple(params))
-            return cursor.fetchall() # Returns list of {'message_author_id': id, 'reaction_count': count}
+            return cursor.fetchall() 
         except (psycopg2.Error, ConnectionError) as e: print(f"ERROR [ReactionStats _fetch_emoji_leaderboard_for_period]: DB error: {e}"); return []
         finally:
             if conn: cursor.close(); conn.close()
@@ -245,29 +240,21 @@ class ReactionStats(commands.Cog):
         if not leaderboard_data: return "No users found for this emoji in this period."
         lines = []
         for i, row in enumerate(leaderboard_data):
-            user = guild.get_member(row['message_author_id']) # Try to get member object
+            user = guild.get_member(row['message_author_id']) 
             user_display = user.mention if user else f"User ID: {row['message_author_id']}"
             lines.append(f"{i+1}. {user_display} - **{row['reaction_count']}** times")
         return "\n".join(lines)
 
-    # --- Command Group ---
-    @commands.group(name="topreactions", aliases=["topreacts", "rstats", "reactionstats"], invoke_without_command=True)
+    @commands.group(name="topreactions", aliases=["topreacts", "rstats"], invoke_without_command=True)
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def topreactions_group(self, ctx: commands.Context, member: Optional[discord.Member] = None):
-        """Shows top reactions for a user or leaderboards for an emoji. Use subcommands."""
         if ctx.invoked_subcommand is None:
-            # Default to showing user's top reactions if no subcommand is given
             await self.user_top_reactions(ctx, member=member)
 
     @topreactions_group.command(name="user")
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def user_top_reactions(self, ctx: commands.Context, member: Optional[discord.Member] = None):
-        """
-        Shows top 3 reactions received by a user across different timeframes.
-        Usage: .rstats user [@user]
-        """
         if not self.db_params: await ctx.send("Database not configured."); return
-
         target_member = member or ctx.author
         now = datetime.datetime.now(datetime.timezone.utc)
         timeframes = {
@@ -292,12 +279,43 @@ class ReactionStats(commands.Cog):
 
     @topreactions_group.command(name="leaderboard")
     @commands.cooldown(1, 10, commands.BucketType.user)
-    async def emoji_leaderboard(self, ctx: commands.Context, emoji: discord.PartialEmoji):
+    async def emoji_leaderboard(self, ctx: commands.Context, *, emoji_input: str): # Changed to take raw string
         """
         Shows a leaderboard for a specific emoji.
         Usage: .rstats leaderboard <emoji>
         """
         if not self.db_params: await ctx.send("Database not configured."); return
+
+        emoji_input_stripped = emoji_input.strip()
+        target_emoji_display: str = emoji_input_stripped 
+        emoji_unicode_arg: Optional[str] = None
+        emoji_custom_id_arg: Optional[int] = None
+
+        try:
+            # Try to convert using PartialEmojiConverter first.
+            # This handles custom emojis like <:name:id> and also standard Unicode emojis.
+            partial_emoji_obj = await commands.PartialEmojiConverter().convert(ctx, emoji_input_stripped)
+            target_emoji_display = str(partial_emoji_obj) # Use its string representation
+            if partial_emoji_obj.is_unicode_emoji(): # Same as not partial_emoji_obj.id
+                emoji_unicode_arg = partial_emoji_obj.name
+            else: # Custom emoji
+                emoji_custom_id_arg = partial_emoji_obj.id
+            print(f"[ReactionStats DEBUG] Parsed emoji via PartialEmojiConverter: {target_emoji_display}, Unicode: {emoji_unicode_arg}, Custom ID: {emoji_custom_id_arg}")
+        except commands.PartialEmojiConversionFailure:
+            # If PartialEmojiConverter fails, it might be a malformed custom emoji string
+            # or a Unicode emoji that it struggled with (though it should generally work).
+            # As a fallback, if it's a short string, assume it's a direct Unicode emoji.
+            if 0 < len(emoji_input_stripped) <= 7: # Max length for complex Unicode emojis with ZWJ/modifiers
+                emoji_unicode_arg = emoji_input_stripped
+                target_emoji_display = emoji_input_stripped # Use the raw input as display
+                print(f"[ReactionStats DEBUG] PartialEmojiConverter failed. Treating as direct Unicode string: {target_emoji_display}")
+            else:
+                await ctx.send(f"Could not interpret '{emoji_input_stripped}' as a valid emoji. Please use a standard Unicode emoji or a custom emoji from a server I'm in.")
+                return
+        
+        if not emoji_unicode_arg and not emoji_custom_id_arg:
+            await ctx.send(f"Failed to identify the emoji: '{emoji_input_stripped}'. Please use a valid emoji.")
+            return
 
         now = datetime.datetime.now(datetime.timezone.utc)
         timeframes = {
@@ -306,29 +324,28 @@ class ReactionStats(commands.Cog):
             "All Time": None
         }
         utils_cog = self.bot.get_cog('Utils')
-        emoji_display_for_title = str(emoji) # Get the string representation for the title
-        embed_title = f"Leaderboard for {emoji_display_for_title} Reaction"
+        
+        embed_title = f"Leaderboard for {target_emoji_display} Reaction"
         embed = utils_cog.create_embed(ctx, title=embed_title, description="", color=discord.Color.gold()) if utils_cog \
                 else discord.Embed(title=embed_title, description="", color=discord.Color.gold(), timestamp=now)
         if not utils_cog: embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None)
 
         any_data_found = False
-        emoji_unicode_arg = emoji.name if not emoji.is_custom_emoji() else None
-        emoji_custom_id_arg = emoji.id if emoji.is_custom_emoji() else None
-
         for period_name, start_time_obj in timeframes.items():
             leaderboard_data = await self._fetch_emoji_leaderboard_for_period(ctx.guild.id, emoji_unicode_arg, emoji_custom_id_arg, start_time_obj)
             if leaderboard_data: any_data_found = True
             field_value = self._format_leaderboard_for_embed_field(leaderboard_data, ctx.guild)
             embed.add_field(name=f"{period_name}", value=field_value, inline=False)
-        if not any_data_found and not embed.fields: embed.description = f"No one has received the {emoji_display_for_title} reaction in any tracked timeframe."
+        
+        if not any_data_found and not embed.fields: 
+            embed.description = f"No one has received the {target_emoji_display} reaction in any tracked timeframe."
+        
         await ctx.send(embed=embed)
 
     @topreactions_group.error
     async def topreactions_group_error(self, ctx, error):
         if isinstance(error, commands.CommandOnCooldown): await ctx.send(f"This command group is on cooldown. Try again in {error.retry_after:.2f}s.")
         else: print(f"Error in topreactions_group: {error}"); traceback.print_exc()
-
 
     @user_top_reactions.error
     async def user_top_reactions_error(self, ctx, error):
@@ -340,11 +357,13 @@ class ReactionStats(commands.Cog):
     @emoji_leaderboard.error
     async def emoji_leaderboard_error(self, ctx, error):
         if isinstance(error, commands.CommandOnCooldown): await ctx.send(f"This command is on cooldown. Try again in {error.retry_after:.2f}s.")
-        elif isinstance(error, commands.PartialEmojiConversionFailure): await ctx.send(f"Could not find the emoji: {error.argument}. Please use a valid emoji.")
-        elif isinstance(error, commands.MissingRequiredArgument) and error.param.name == "emoji": await ctx.send("You need to specify an emoji for the leaderboard. Usage: `.rstats leaderboard <emoji>`")
+        elif isinstance(error, commands.MissingRequiredArgument) and error.param.name == "emoji_input": 
+            await ctx.send("You need to specify an emoji for the leaderboard. Usage: `.rstats leaderboard <emoji>`")
+        # The PartialEmojiConversionFailure might still be caught if the converter is used explicitly and fails in an unhandled way
+        elif isinstance(error, commands.PartialEmojiConversionFailure): 
+             await ctx.send(f"Could not interpret '{error.argument}' as a valid emoji. Please use a standard Unicode emoji or a custom emoji from a server the bot is in.")
         elif isinstance(error, commands.CommandInvokeError) and isinstance(error.original, ConnectionError): await ctx.send("DB connection error for emoji leaderboard.")
-        else: await ctx.send("An error occurred with the emoji leaderboard."); print(f"Error in emoji_leaderboard_error: {error}"); traceback.print_exc()
-
+        else: await ctx.send("An error occurred with the emoji leaderboard command."); print(f"Error in emoji_leaderboard_error: {error}"); traceback.print_exc()
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(ReactionStats(bot))
