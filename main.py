@@ -7,8 +7,9 @@ from custom_context import EmbedContext  # import the custom context
 
 # Initialize bot with . prefix, intents, and no default help command
 intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
+intents.message_content = True # You likely have this
+intents.members = True         # ESSENTIAL for member info and some events
+intents.voice_states = True    # ESSENTIAL for on_voice_state_update
 
 # Use the custom EmbedContext class
 bot = commands.Bot(command_prefix='.', intents=intents, help_command=None, context_class=EmbedContext)
