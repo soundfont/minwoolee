@@ -253,7 +253,8 @@ class ReactionStats(commands.Cog):
             reactions_data = await self._fetch_top_reactions_for_period(ctx.guild.id, target_member.id, start_time_obj)
             if reactions_data: any_data_found = True
             field_value = self._format_reactions_for_embed_field(reactions_data, period_name)
-            embed.add_field(name=f"📊 {period_name}", value=field_value, inline=False)
+            # Removed the "📊" emoji from the field name here
+            embed.add_field(name=f"{period_name}", value=field_value, inline=False)
 
         if not any_data_found and not embed.fields: # If absolutely no data across all timeframes and no fields added yet
              embed.description = "No reactions found for this user across any tracked timeframe."
