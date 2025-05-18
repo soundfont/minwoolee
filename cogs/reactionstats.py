@@ -204,8 +204,7 @@ class ReactionStats(commands.Cog):
     async def _fetch_emoji_leaderboard_for_period(self, guild_id: int, emoji_unicode: Optional[str], emoji_custom_id: Optional[int], start_time: Optional[datetime.datetime]) -> List[Dict]:
         if not self.db_params: return []
         time_filter_sql = "AND reacted_at >= %s" if start_time else ""
-        # Ensure only one of emoji_unicode or emoji_custom_id is used for filtering
-        if emoji_unicode and emoji_custom_id: # Should not happen with current parsing logic
+        if emoji_unicode and emoji_custom_id: 
             print("[ReactionStats DEBUG] Both unicode and custom_id provided to _fetch_emoji_leaderboard. Prioritizing unicode.")
             emoji_custom_id = None
         
@@ -226,7 +225,7 @@ class ReactionStats(commands.Cog):
             params = [guild_id]
             if emoji_unicode: params.append(emoji_unicode)
             elif emoji_custom_id: params.append(emoji_custom_id)
-            else: return [] # No valid emoji identifier provided
+            else: return [] 
             
             if start_time: params.append(start_time)
             
@@ -236,13 +235,14 @@ class ReactionStats(commands.Cog):
         finally:
             if conn: cursor.close(); conn.close()
 
-    def _format_leaderboard_for_embed_field(self, leaderboard_data: List[Dict], guild: discord.Guild) -> str:
+    def _format_leaderboard_for_embed_field(self, leaderboard_data: List[Dict], guild: discord.Guild, target_emoji_str: str) -> str: # Added target_emoji_str
         if not leaderboard_data: return "No users found for this emoji in this period."
         lines = []
         for i, row in enumerate(leaderboard_data):
             user = guild.get_member(row['message_author_id']) 
             user_display = user.mention if user else f"User ID: {row['message_author_id']}"
-            lines.append(f"{i+1}. {user_display} - **{row['reaction_count']}** times")
+            # Updated line to include the target emoji
+            lines.append(f"{i+1}. {user_display} - **{row['reaction_count']}** {target_emoji_str}")
         return "\n".join(lines)
 
     @commands.group(name="topreactions", aliases=["topreacts", "rstats"], invoke_without_command=True)
@@ -272,14 +272,14 @@ class ReactionStats(commands.Cog):
         for period_name, start_time_obj in timeframes.items():
             reactions_data = await self._fetch_top_reactions_for_user_period(ctx.guild.id, target_member.id, start_time_obj)
             if reactions_data: any_data_found = True
-            field_value = self._format_reactions_list_for_embed_field(reactions_data)
+            field_value = self._format_reactions_list_for_embed_field(reactions_data) # Pass period_name for consistency if needed by formatter
             embed.add_field(name=f"{period_name}", value=field_value, inline=False)
         if not any_data_found and not embed.fields: embed.description = "No reactions found for this user."
         await ctx.send(embed=embed)
 
     @topreactions_group.command(name="leaderboard")
     @commands.cooldown(1, 10, commands.BucketType.user)
-    async def emoji_leaderboard(self, ctx: commands.Context, *, emoji_input: str): # Changed to take raw string
+    async def emoji_leaderboard(self, ctx: commands.Context, *, emoji_input: str): 
         """
         Shows a leaderboard for a specific emoji.
         Usage: .rstats leaderboard <emoji>
@@ -292,23 +292,16 @@ class ReactionStats(commands.Cog):
         emoji_custom_id_arg: Optional[int] = None
 
         try:
-            # Try to convert using PartialEmojiConverter first.
-            # This handles custom emojis like <:name:id> and also standard Unicode emojis.
             partial_emoji_obj = await commands.PartialEmojiConverter().convert(ctx, emoji_input_stripped)
-            target_emoji_display = str(partial_emoji_obj) # Use its string representation
-            if partial_emoji_obj.is_unicode_emoji(): # Same as not partial_emoji_obj.id
+            target_emoji_display = str(partial_emoji_obj) 
+            if partial_emoji_obj.is_unicode_emoji(): 
                 emoji_unicode_arg = partial_emoji_obj.name
-            else: # Custom emoji
+            else: 
                 emoji_custom_id_arg = partial_emoji_obj.id
-            print(f"[ReactionStats DEBUG] Parsed emoji via PartialEmojiConverter: {target_emoji_display}, Unicode: {emoji_unicode_arg}, Custom ID: {emoji_custom_id_arg}")
         except commands.PartialEmojiConversionFailure:
-            # If PartialEmojiConverter fails, it might be a malformed custom emoji string
-            # or a Unicode emoji that it struggled with (though it should generally work).
-            # As a fallback, if it's a short string, assume it's a direct Unicode emoji.
-            if 0 < len(emoji_input_stripped) <= 7: # Max length for complex Unicode emojis with ZWJ/modifiers
+            if 0 < len(emoji_input_stripped) <= 7: 
                 emoji_unicode_arg = emoji_input_stripped
-                target_emoji_display = emoji_input_stripped # Use the raw input as display
-                print(f"[ReactionStats DEBUG] PartialEmojiConverter failed. Treating as direct Unicode string: {target_emoji_display}")
+                target_emoji_display = emoji_input_stripped 
             else:
                 await ctx.send(f"Could not interpret '{emoji_input_stripped}' as a valid emoji. Please use a standard Unicode emoji or a custom emoji from a server I'm in.")
                 return
@@ -334,7 +327,8 @@ class ReactionStats(commands.Cog):
         for period_name, start_time_obj in timeframes.items():
             leaderboard_data = await self._fetch_emoji_leaderboard_for_period(ctx.guild.id, emoji_unicode_arg, emoji_custom_id_arg, start_time_obj)
             if leaderboard_data: any_data_found = True
-            field_value = self._format_leaderboard_for_embed_field(leaderboard_data, ctx.guild)
+            # Pass the target_emoji_display to the formatter
+            field_value = self._format_leaderboard_for_embed_field(leaderboard_data, ctx.guild, target_emoji_display)
             embed.add_field(name=f"{period_name}", value=field_value, inline=False)
         
         if not any_data_found and not embed.fields: 
@@ -359,7 +353,6 @@ class ReactionStats(commands.Cog):
         if isinstance(error, commands.CommandOnCooldown): await ctx.send(f"This command is on cooldown. Try again in {error.retry_after:.2f}s.")
         elif isinstance(error, commands.MissingRequiredArgument) and error.param.name == "emoji_input": 
             await ctx.send("You need to specify an emoji for the leaderboard. Usage: `.rstats leaderboard <emoji>`")
-        # The PartialEmojiConversionFailure might still be caught if the converter is used explicitly and fails in an unhandled way
         elif isinstance(error, commands.PartialEmojiConversionFailure): 
              await ctx.send(f"Could not interpret '{error.argument}' as a valid emoji. Please use a standard Unicode emoji or a custom emoji from a server the bot is in.")
         elif isinstance(error, commands.CommandInvokeError) and isinstance(error.original, ConnectionError): await ctx.send("DB connection error for emoji leaderboard.")
