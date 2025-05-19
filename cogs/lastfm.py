@@ -8,6 +8,7 @@ import traceback
 from typing import Optional, Dict, Any
 from urllib.parse import urlparse, quote_plus # For URL encoding
 import aiohttp # For making API requests
+import asyncio # For adding reactions with a small delay
 
 # --- Last.fm API Configuration ---
 LASTFM_API_BASE_URL = "http://ws.audioscrobbler.com/2.0/"
@@ -17,6 +18,7 @@ class LastFM(commands.Cog):
     Integrates Last.fm to show what users are listening to.
     Last.fm accounts are linked globally per Discord user.
     Requires a LASTFM_API_KEY environment variable.
+    The bot will react to its own .fm messages with up/down arrows.
     """
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -33,7 +35,7 @@ class LastFM(commands.Cog):
             print("ERROR [LastFM Init]: DATABASE_URL environment variable not set. Last.fm cog cannot store usernames.")
         
         self.http_session = aiohttp.ClientSession()
-        print("[LastFM DEBUG] Cog initialized (Global Linking).")
+        print("[LastFM DEBUG] Cog initialized (Global Linking, Embed Updates).")
 
     async def cog_unload(self):
         """Clean up the aiohttp session when the cog is unloaded."""
@@ -68,7 +70,6 @@ class LastFM(commands.Cog):
         try:
             conn = self._get_db_connection()
             cursor = conn.cursor()
-            # Table name changed to reflect global nature, user_id is now PRIMARY KEY
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS lastfm_global_users (
                     user_id BIGINT PRIMARY KEY,
@@ -111,20 +112,45 @@ class LastFM(commands.Cog):
             
     def _create_fallback_embed(self, title: str, description: str, color: discord.Color, ctx: Optional[commands.Context] = None) -> discord.Embed:
         embed = discord.Embed(title=title, description=description, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
-        if ctx and ctx.author:
-            embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None)
+        # Footer is set by Utils cog or manually in fm_group if Utils is not present
         return embed
 
-    async def _send_embed_response(self, ctx: commands.Context, title: str, description: str, color: discord.Color):
+    async def _send_embed_response(self, ctx: commands.Context, title: str, description: str, color: discord.Color, image_url_for_thumbnail: Optional[str] = None, author_for_embed: Optional[discord.User | discord.Member] = None) -> Optional[discord.Message]:
+        """Helper to send embed responses, using Utils cog if available, and sets thumbnail."""
         utils_cog = self.bot.get_cog('Utils')
+        embed: discord.Embed
+
         if utils_cog and hasattr(utils_cog, 'create_embed'):
+            # Assuming create_embed in Utils does NOT set thumbnail by default, or if it does, we override it later.
+            # If create_embed takes ctx, title, description, color:
             embed = utils_cog.create_embed(ctx, title=title, description=description, color=color)
-        else:
+            # Ensure author is set if provided (Utils might already do this via ctx)
+            if author_for_embed:
+                display_avatar_url = author_for_embed.display_avatar.url if author_for_embed.avatar else None
+                embed.set_author(name=str(author_for_embed.display_name), icon_url=display_avatar_url)
+        else: # Fallback
             embed = self._create_fallback_embed(title=title, description=description, color=color, ctx=ctx)
-        await ctx.send(embed=embed)
+            if author_for_embed:
+                display_avatar_url = author_for_embed.display_avatar.url if author_for_embed.avatar else None
+                embed.set_author(name=str(author_for_embed.display_name), icon_url=display_avatar_url)
+            if ctx.author: # Set footer if not handled by Utils
+                 embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None)
+
+
+        # Set album cover as thumbnail (overrides any default from Utils)
+        if image_url_for_thumbnail:
+            embed.set_thumbnail(url=image_url_for_thumbnail)
+        
+        try:
+            sent_message = await ctx.send(embed=embed)
+            return sent_message
+        except discord.HTTPException as e:
+            print(f"Error sending embed in _send_embed_response: {e}")
+            return None
+
 
     @commands.group(name="fm", invoke_without_command=True)
-    @commands.cooldown(1, 5, commands.BucketType.user)
+    @commands.cooldown(1, 3, commands.BucketType.user) # Shortened cooldown slightly
     async def fm_group(self, ctx: commands.Context, *, member: Optional[discord.Member] = None):
         """Shows your or another user's currently playing/last scrobbled track on Last.fm.
         Use '.fm set <username>' to link your Last.fm account globally.
@@ -140,7 +166,6 @@ class LastFM(commands.Cog):
         try:
             conn = self._get_db_connection()
             cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-            # Query based on user_id only
             cursor.execute("SELECT lastfm_username FROM lastfm_global_users WHERE user_id = %s", (target_user.id,))
             row = cursor.fetchone()
             if row:
@@ -159,7 +184,7 @@ class LastFM(commands.Cog):
             await self._send_embed_response(ctx, "Last.fm Account Not Set", msg, discord.Color.orange())
             return
 
-        params = {"method": "user.getrecenttracks", "user": lastfm_username, "limit": 1}
+        params = {"method": "user.getrecenttracks", "user": lastfm_username, "limit": 1, "extended": "1"} # extended=1 for loved status
         data = await self._call_lastfm_api(params)
 
         if not data or 'recenttracks' not in data or not data['recenttracks'].get('track'):
@@ -171,11 +196,18 @@ class LastFM(commands.Cog):
         artist_name = track_info['artist']['#text']
         track_name = track_info['name']
         album_name = track_info['album']['#text']
-        image_url = next((img['#text'] for img in track_info.get('image', []) if img['size'] == 'extralarge'), 
-                         next((img['#text'] for img in track_info.get('image', []) if img['size'] == 'large'), None))
         
+        image_url = None # This will be the album art
+        for img in track_info.get('image', []):
+            if img['size'] == 'extralarge': image_url = img['#text']; break
+            elif img['size'] == 'large': image_url = img['#text'] 
+        if not image_url and track_info.get('image'): # Fallback to any available image if specific sizes not found
+            image_url = track_info['image'][-1]['#text']
+
+
         is_now_playing = track_info.get('@attr', {}).get('nowplaying') == 'true'
-        embed_title = f"Now Playing for {lastfm_username}" if is_now_playing else f"Last Scrobbled by {lastfm_username}"
+        embed_title = f"🎧 Now Playing for {lastfm_username}" if is_now_playing else f"🎧 Last Scrobbled by {lastfm_username}"
+        
         description = f"**Track:** [{track_name}]({track_info.get('url', '#')})\n" \
                       f"**Artist:** {artist_name}\n"
         if album_name: description += f"**Album:** {album_name}\n"
@@ -186,19 +218,28 @@ class LastFM(commands.Cog):
             if scrobble_date_uts:
                 scrobble_datetime = datetime.datetime.fromtimestamp(int(scrobble_date_uts), tz=datetime.timezone.utc)
                 description += f"\n*Scrobbled: {discord.utils.format_dt(scrobble_datetime, style='R')}*"
+        
+        # Send the embed and get the message object
+        sent_message = await self._send_embed_response(
+            ctx, 
+            title=embed_title, 
+            description=description, 
+            color=discord.Color.red(), # Last.fm red
+            image_url_for_thumbnail=image_url, # Pass album art URL here
+            author_for_embed=target_user # Pass target_user to set as author of embed
+        )
+            
+        # React to the bot's own message if it was sent successfully
+        if sent_message:
+            try:
+                await sent_message.add_reaction("👍")
+                await asyncio.sleep(0.1) # Small delay to help ensure order if needed
+                await sent_message.add_reaction("👎")
+            except discord.Forbidden:
+                print(f"[LastFM DEBUG] Bot missing 'Add Reactions' permission in channel {ctx.channel.name} to react to its own message.")
+            except Exception as e:
+                print(f"[LastFM DEBUG] Error adding reactions to own message: {e}")
 
-        utils_cog = self.bot.get_cog('Utils')
-        if utils_cog and hasattr(utils_cog, 'create_embed'):
-            embed = utils_cog.create_embed(ctx, title=embed_title, description=description, color=discord.Color.red())
-            if target_user.avatar: embed.set_author(name=target_user.display_name, icon_url=target_user.display_avatar.url)
-            else: embed.set_author(name=target_user.display_name)
-        else: 
-            embed = discord.Embed(title=embed_title, description=description, color=discord.Color.red(), timestamp=datetime.datetime.now(datetime.timezone.utc))
-            if target_user.avatar: embed.set_author(name=target_user.display_name, icon_url=target_user.display_avatar.url)
-            else: embed.set_author(name=target_user.display_name)
-            embed.set_footer(text=f"Requested by {ctx.author.name}")
-        if image_url: embed.set_thumbnail(url=image_url)
-        await ctx.send(embed=embed)
 
     @fm_group.command(name="set")
     async def fm_set(self, ctx: commands.Context, lastfm_username: str):
@@ -220,7 +261,6 @@ class LastFM(commands.Cog):
         try:
             conn = self._get_db_connection()
             cursor = conn.cursor()
-            # UPSERT on user_id only
             cursor.execute("""
                 INSERT INTO lastfm_global_users (user_id, lastfm_username, linked_at)
                 VALUES (%s, %s, %s)
@@ -229,7 +269,6 @@ class LastFM(commands.Cog):
             conn.commit()
             cursor.close()
             await self._send_embed_response(ctx, "Last.fm Account Set", f"Your Last.fm username has been globally set to **{lastfm_username}**.", discord.Color.green())
-            print(f"[LastFM DEBUG] User {ctx.author.id} globally set Last.fm username to {lastfm_username}")
         except (psycopg2.Error, ConnectionError) as e:
             await self._send_embed_response(ctx, "Database Error", "Failed to save your Last.fm username.", discord.Color.red())
             print(f"ERROR [LastFM fm_set DB]: {e}")
@@ -242,7 +281,6 @@ class LastFM(commands.Cog):
         if not self.db_params:
             await self._send_embed_response(ctx, "Database Error", "Database not configured.", discord.Color.red())
             return
-        
         conn = None
         try:
             conn = self._get_db_connection()
@@ -253,7 +291,6 @@ class LastFM(commands.Cog):
             cursor.close()
             if deleted_rows > 0:
                 await self._send_embed_response(ctx, "Last.fm Account Removed", "Your globally linked Last.fm username has been removed.", discord.Color.orange())
-                print(f"[LastFM DEBUG] User {ctx.author.id} removed global Last.fm username.")
             else:
                 await self._send_embed_response(ctx, "Last.fm Account Not Set", "You don't have a Last.fm username set with this bot.", discord.Color.blue())
         except (psycopg2.Error, ConnectionError) as e:
@@ -276,5 +313,5 @@ class LastFM(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(LastFM(bot))
-    print("Cog 'LastFM' (Global Linking) loaded successfully.")
+    print("Cog 'LastFM' (Global Linking, Embed Updates, Self-React) loaded successfully.")
 
