@@ -204,7 +204,7 @@ class LastFM(commands.Cog):
 
         if not lastfm_username:
             is_self = target_user == ctx.author
-            msg = f"You need to set your Last.fm username first using `.fm set <your_lastfm_username>`." if is_self \
+            msg = f"You need to set your Last.fm username first using `.fm set <username>`." if is_self \
                   else f"{target_user.display_name} has not set their Last.fm username with this bot."
             print(f"[LastFM DEBUG fm_group] Last.fm username not set for {target_user.name}.")
             await self._send_embed_response(ctx, "Last.fm Account Not Set", msg, discord.Color.orange())
