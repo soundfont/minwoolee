@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, List, Tuple
 from urllib.parse import urlparse, quote_plus # For URL encoding
 import aiohttp # For making API requests
 import asyncio # For adding reactions with a small delay
+import json # <<< IMPORT ADDED HERE
 
 # --- Last.fm API Configuration ---
 LASTFM_API_BASE_URL = "http://ws.audioscrobbler.com/2.0/"
@@ -36,7 +37,7 @@ class LastFM(commands.Cog):
             print("ERROR [LastFM Init]: DATABASE_URL environment variable not set. Last.fm cog cannot store usernames.")
         
         self.http_session = aiohttp.ClientSession()
-        print("[LastFM DEBUG __init__] Cog initialized (Further Artist/Album Debugging & Final Name Log).")
+        print("[LastFM DEBUG __init__] Cog initialized (Fixed NameError & Debugging).")
 
     async def cog_unload(self):
         await self.http_session.close()
@@ -96,7 +97,7 @@ class LastFM(commands.Cog):
             async with self.http_session.get(request_url, params=params) as response:
                 print(f"[LastFM DEBUG _call_lastfm_api] Response status: {response.status}")
                 if response.status == 200:
-                    data = await response.json()
+                    data = await response.json() # This uses aiohttp's built-in JSON decoder
                     if 'error' in data:
                         print(f"ERROR [LastFM API Call]: {data.get('message', 'Unknown API error')} (Code: {data.get('error')}) for user {params.get('user', 'N/A')}")
                         return data 
@@ -174,7 +175,6 @@ class LastFM(commands.Cog):
             if conn: cursor.close(); conn.close()
 
     def _parse_lastfm_period(self, period_input: str) -> Tuple[Optional[str], Optional[str]]:
-        # ... (this method remains unchanged) ...
         period_input_lower = period_input.lower()
         if period_input_lower == "overall": return "overall", "Overall"
         if period_input_lower in ["1d", "day", "24h"]: return "7day", "Last 7 Days (defaulted from 1 Day)"
@@ -227,7 +227,7 @@ class LastFM(commands.Cog):
             return
             
         track_info = track_info_list[0] 
-        print(f"[LastFM DEBUG fm_group] Full track_info received: {json.dumps(track_info, indent=2)}") # Pretty print JSON
+        print(f"[LastFM DEBUG fm_group] Full track_info received: {json.dumps(track_info, indent=2)}") 
         
         track_name = track_info.get('name', "Unknown Track")
         
@@ -236,7 +236,7 @@ class LastFM(commands.Cog):
         print(f"[LastFM DEBUG fm_group] Raw artist data: {artist_data_raw} (type: {type(artist_data_raw)})")
         if isinstance(artist_data_raw, dict):
             artist_name_candidate = artist_data_raw.get('#text')
-            if artist_name_candidate and artist_name_candidate.strip(): # Ensure it's not empty string
+            if artist_name_candidate and artist_name_candidate.strip(): 
                 artist_name = artist_name_candidate
         elif isinstance(artist_data_raw, str) and artist_data_raw.strip(): 
             artist_name = artist_data_raw
@@ -263,7 +263,6 @@ class LastFM(commands.Cog):
         print(f"[LastFM DEBUG fm_group] Final determined album_name: '{album_name}'")
         
         image_url = None 
-        # ... (image parsing logic remains the same) ...
         for img in track_info.get('image', []): 
             if isinstance(img, dict) and img.get('size') == 'extralarge' and img.get('#text'): image_url = img['#text']; break
             elif isinstance(img, dict) and img.get('size') == 'large' and img.get('#text'): image_url = img['#text'] 
@@ -274,7 +273,6 @@ class LastFM(commands.Cog):
                     if isinstance(img_data, dict) and img_data.get('size') == size_key and img_data.get('#text'): largest_image = img_data['#text']; break
                 if largest_image: break
             image_url = largest_image
-
 
         is_now_playing = track_info.get('@attr', {}).get('nowplaying') == 'true'
         embed_title = f"🎧 Last.fm for {lastfm_username}"
@@ -303,8 +301,6 @@ class LastFM(commands.Cog):
             except discord.Forbidden: print(f"[LastFM DEBUG] Bot missing 'Add Reactions' in {ctx.channel.name}.")
             except Exception as e: print(f"[LastFM DEBUG] Error adding reactions: {e}")
 
-    # --- fm_set, fm_remove, fm_top_artists, and error handlers remain the same ---
-    # (Code for these subcommands and their error handlers is omitted for brevity but assumed to be the same as the previous version)
     @fm_group.command(name="set")
     async def fm_set(self, ctx: commands.Context, lastfm_username: str):
         print(f"[LastFM DEBUG fm_set] Command invoked by {ctx.author.name} to set username to '{lastfm_username}'.")
@@ -336,7 +332,6 @@ class LastFM(commands.Cog):
             print(f"ERROR [LastFM fm_set DB]: {e}")
         finally:
             if conn: conn.close()
-
 
     @fm_group.command(name="remove", aliases=["unset"])
     async def fm_remove(self, ctx: commands.Context):
