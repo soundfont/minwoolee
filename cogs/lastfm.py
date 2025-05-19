@@ -35,7 +35,7 @@ class LastFM(commands.Cog):
             print("ERROR [LastFM Init]: DATABASE_URL environment variable not set. Last.fm cog cannot store usernames.")
         
         self.http_session = aiohttp.ClientSession()
-        print("[LastFM DEBUG] Cog initialized (Global Linking, Embed Updates).")
+        print("[LastFM DEBUG] Cog initialized (Global Linking, Embed Updates, Self-React, KeyError Fix).")
 
     async def cog_unload(self):
         """Clean up the aiohttp session when the cog is unloaded."""
@@ -181,51 +181,42 @@ class LastFM(commands.Cog):
 
         track_info = data['recenttracks']['track'][0]
         
-        # --- Robust parsing for track details ---
         track_name = track_info.get('name', "Unknown Track")
         
         artist_data = track_info.get('artist', {})
-        if isinstance(artist_data, dict):
-            artist_name = artist_data.get('#text', "Unknown Artist")
-        elif isinstance(artist_data, str): # Should not happen with recenttracks but defensive
-            artist_name = artist_data
-        else:
-            artist_name = "Unknown Artist"
+        artist_name = artist_data.get('#text', "Unknown Artist") if isinstance(artist_data, dict) else \
+                      artist_data if isinstance(artist_data, str) else "Unknown Artist"
 
         album_data = track_info.get('album', {})
-        if isinstance(album_data, dict):
-            album_name = album_data.get('#text', "Unknown Album")
-        elif isinstance(album_data, str): # Should not happen
-            album_name = album_data
-        else:
-            album_name = "Unknown Album"
-        # --- End robust parsing ---
+        album_name = album_data.get('#text', "Unknown Album") if isinstance(album_data, dict) else \
+                     album_data if isinstance(album_data, str) else "Unknown Album"
         
         image_url = None 
-        for img in track_info.get('image', []):
-            if img.get('size') == 'extralarge' and img.get('#text'): image_url = img['#text']; break
-            elif img.get('size') == 'large' and img.get('#text'): image_url = img['#text'] 
+        for img in track_info.get('image', []): # Iterate safely
+            if isinstance(img, dict) and img.get('size') == 'extralarge' and img.get('#text'): image_url = img['#text']; break
+            elif isinstance(img, dict) and img.get('size') == 'large' and img.get('#text'): image_url = img['#text'] 
         if not image_url and track_info.get('image'): 
-            # Find largest available image if specific ones not found
             largest_image = None
-            size_order = ['mega', 'extralarge', 'large', 'medium', 'small', ''] # From largest to smallest
+            size_order = ['mega', 'extralarge', 'large', 'medium', 'small', ''] 
             for size_key in size_order:
                 for img in track_info.get('image', []):
-                    if img.get('size') == size_key and img.get('#text'):
-                        largest_image = img['#text']
-                        break
+                    if isinstance(img, dict) and img.get('size') == size_key and img.get('#text'):
+                        largest_image = img['#text']; break
                 if largest_image: break
             image_url = largest_image
 
         is_now_playing = track_info.get('@attr', {}).get('nowplaying') == 'true'
-        embed_title = f"🎧 Now Playing for {lastfm_username}" if is_now_playing else f"🎧 Last Scrobbled by {lastfm_username}"
+        
+        # Updated title and status text
+        embed_title = f"🎧 Last.fm for {lastfm_username}" # Simplified title
         
         description = f"**Track:** [{track_name}]({track_info.get('url', '#')})\n" \
                       f"**Artist:** {artist_name}\n"
-        if album_name and album_name != "Unknown Album": # Only show album if known
+        if album_name and album_name != "Unknown Album": 
             description += f"**Album:** {album_name}\n"
         
-        if is_now_playing: description += "\n*Currently Listening...*"
+        if is_now_playing:
+            description += f"\n*Scrobbled: just now*" # Changed text
         else:
             scrobble_date_uts = track_info.get('date', {}).get('uts')
             if scrobble_date_uts:
@@ -234,6 +225,8 @@ class LastFM(commands.Cog):
                     description += f"\n*Scrobbled: {discord.utils.format_dt(scrobble_datetime, style='R')}*"
                 except ValueError:
                     description += f"\n*Scrobbled: Invalid date from API*"
+            else:
+                description += "\n*Scrobble time not available*"
 
 
         sent_message = await self._send_embed_response(
@@ -245,9 +238,9 @@ class LastFM(commands.Cog):
             
         if sent_message:
             try:
-                await sent_message.add_reaction("👍")
+                await sent_message.add_reaction("⬆️")
                 await asyncio.sleep(0.1) 
-                await sent_message.add_reaction("👎")
+                await sent_message.add_reaction("⬇️")
             except discord.Forbidden:
                 print(f"[LastFM DEBUG] Bot missing 'Add Reactions' permission in channel {ctx.channel.name} to react to its own message.")
             except Exception as e:
@@ -311,8 +304,8 @@ class LastFM(commands.Cog):
     async def fm_group_error(self, ctx, error):
         if isinstance(error, commands.CommandOnCooldown): await self._send_embed_response(ctx, "Cooldown", f"Command on cooldown. Try again in {error.retry_after:.2f}s.", discord.Color.orange())
         elif isinstance(error, commands.MemberNotFound): await self._send_embed_response(ctx, "User Not Found", f"Could not find user: {error.argument}", discord.Color.red())
-        elif isinstance(error, commands.CommandInvokeError) and isinstance(error.original, KeyError): # Catch the specific KeyError
-            await self._send_embed_response(ctx, "Last.fm Data Error", "Could not parse track information from Last.fm. The data structure might have changed or is incomplete for this track.", discord.Color.orange())
+        elif isinstance(error, commands.CommandInvokeError) and isinstance(error.original, KeyError): 
+            await self._send_embed_response(ctx, "Last.fm Data Error", "Could not parse track information from Last.fm. The data might be incomplete for this track.", discord.Color.orange())
             print(f"KeyError in fm_group: {error.original}"); traceback.print_exc()
         else: await self._send_embed_response(ctx, "Last.fm Error", f"Unexpected error: {error}", discord.Color.red()); print(f"Error in fm_group: {error}"); traceback.print_exc()
 
@@ -324,5 +317,5 @@ class LastFM(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(LastFM(bot))
-    print("Cog 'LastFM' (Global Linking, Embed Updates, Self-React, KeyError Fix) loaded successfully.")
+    print("Cog 'LastFM' (Global Linking, Updated Now Playing Text) loaded successfully.")
 
