@@ -36,7 +36,7 @@ class LastFM(commands.Cog):
             print("ERROR [LastFM Init]: DATABASE_URL environment variable not set. Last.fm cog cannot store usernames.")
         
         self.http_session = aiohttp.ClientSession()
-        print("[LastFM DEBUG __init__] Cog initialized (Global Linking, Top Artists, Updated Timeframes, Robust Artist/Album Parse).")
+        print("[LastFM DEBUG __init__] Cog initialized (Further Artist/Album Parsing Refinement).")
 
     async def cog_unload(self):
         await self.http_session.close()
@@ -154,7 +154,6 @@ class LastFM(commands.Cog):
             traceback.print_exc()
             return None
 
-
     async def _get_lastfm_username(self, user_id: int) -> Optional[str]:
         if not self.db_params: 
             print("[LastFM DEBUG _get_lastfm_username] DB not configured.")
@@ -204,7 +203,7 @@ class LastFM(commands.Cog):
 
         if not lastfm_username:
             is_self = target_user == ctx.author
-            msg = f"You need to set your Last.fm username first using `.fm set <username>`." if is_self \
+            msg = f"You need to set your Last.fm username first using `.fm set <your_lastfm_username>`." if is_self \
                   else f"{target_user.display_name} has not set their Last.fm username with this bot."
             print(f"[LastFM DEBUG fm_group] Last.fm username not set for {target_user.name}.")
             await self._send_embed_response(ctx, "Last.fm Account Not Set", msg, discord.Color.orange())
@@ -220,19 +219,43 @@ class LastFM(commands.Cog):
             await self._send_embed_response(ctx, "Last.fm Error", error_msg, discord.Color.red())
             return
 
-        track_info = data['recenttracks']['track'][0]
-        print(f"[LastFM DEBUG fm_group] Track info received: {track_info.get('name', 'N/A')}")
+        track_info_list = data['recenttracks']['track']
+        if not isinstance(track_info_list, list) or not track_info_list: # Ensure it's a non-empty list
+            print(f"[LastFM DEBUG fm_group] 'track' field is not a list or is empty for {lastfm_username}.")
+            await self._send_embed_response(ctx, "Last.fm Error", f"No track information found for '{lastfm_username}'.", discord.Color.red())
+            return
+            
+        track_info = track_info_list[0] # Get the first track (most recent)
+        print(f"[LastFM DEBUG fm_group] Full track_info received: {track_info}")
         
         track_name = track_info.get('name', "Unknown Track")
+        
+        # --- Refined Artist Name Parsing ---
         artist_name = "Unknown Artist" 
         artist_data_raw = track_info.get('artist')
-        if isinstance(artist_data_raw, dict): artist_name = artist_data_raw.get('#text', artist_name)
-        elif isinstance(artist_data_raw, str) and artist_data_raw.strip(): artist_name = artist_data_raw
+        print(f"[LastFM DEBUG fm_group] Raw artist data: {artist_data_raw} (type: {type(artist_data_raw)})")
+        if isinstance(artist_data_raw, dict):
+            artist_name = artist_data_raw.get('#text', artist_name) 
+        elif isinstance(artist_data_raw, str) and artist_data_raw.strip(): 
+            artist_name = artist_data_raw
+        elif isinstance(artist_data_raw, list) and artist_data_raw: # Handle if artist is a list
+            first_artist_entry = artist_data_raw[0]
+            if isinstance(first_artist_entry, dict):
+                artist_name = first_artist_entry.get('#text', artist_name)
+            elif isinstance(first_artist_entry, str) and first_artist_entry.strip():
+                artist_name = first_artist_entry
+            print(f"[LastFM DEBUG fm_group] Artist data was a list, used first artist: {artist_name}")
+        # --- End Refined Artist Name Parsing ---
         
+        # --- Refined Album Name Parsing ---
         album_name = "Unknown Album" 
         album_data_raw = track_info.get('album')
-        if isinstance(album_data_raw, dict): album_name = album_data_raw.get('#text', album_name)
-        elif isinstance(album_data_raw, str) and album_data_raw.strip(): album_name = album_data_raw
+        print(f"[LastFM DEBUG fm_group] Raw album data: {album_data_raw} (type: {type(album_data_raw)})")
+        if isinstance(album_data_raw, dict):
+            album_name = album_data_raw.get('#text', album_name)
+        elif isinstance(album_data_raw, str) and album_data_raw.strip():
+            album_name = album_data_raw
+        # --- End Refined Album Name Parsing ---
         
         image_url = None 
         for img in track_info.get('image', []): 
@@ -241,7 +264,7 @@ class LastFM(commands.Cog):
         if not image_url and track_info.get('image'): 
             largest_image = None; size_order = ['mega', 'extralarge', 'large', 'medium', 'small', ''] 
             for size_key in size_order:
-                for img_data in track_info.get('image', []): # Renamed img to img_data
+                for img_data in track_info.get('image', []): 
                     if isinstance(img_data, dict) and img_data.get('size') == size_key and img_data.get('#text'): largest_image = img_data['#text']; break
                 if largest_image: break
             image_url = largest_image
@@ -262,7 +285,7 @@ class LastFM(commands.Cog):
                 except ValueError: description += f"\n*Scrobbled: Invalid date from API*"
             else: description += "\n*Scrobble time not available*"
 
-        print(f"[LastFM DEBUG fm_group] Sending Now Playing embed for {lastfm_username}. Track: {track_name}")
+        print(f"[LastFM DEBUG fm_group] Sending Now Playing embed for {lastfm_username}. Track: {track_name}, Artist: {artist_name}, Album: {album_name}")
         sent_message = await self._send_embed_response(
             ctx, title=embed_title, description=description, color=discord.Color.red(), 
             image_url_for_thumbnail=image_url, author_for_embed=target_user
@@ -275,6 +298,7 @@ class LastFM(commands.Cog):
 
     @fm_group.command(name="set")
     async def fm_set(self, ctx: commands.Context, lastfm_username: str):
+        # ... (fm_set logic remains the same) ...
         print(f"[LastFM DEBUG fm_set] Command invoked by {ctx.author.name} to set username to '{lastfm_username}'.")
         if not self.db_params:
             await self._send_embed_response(ctx, "Configuration Error", "Database not configured. Cannot save Last.fm username.", discord.Color.red()); return
@@ -305,8 +329,10 @@ class LastFM(commands.Cog):
         finally:
             if conn: conn.close()
 
+
     @fm_group.command(name="remove", aliases=["unset"])
     async def fm_remove(self, ctx: commands.Context):
+        # ... (fm_remove logic remains the same) ...
         print(f"[LastFM DEBUG fm_remove] Command invoked by {ctx.author.name}.")
         if not self.db_params:
             await self._send_embed_response(ctx, "Database Error", "Database not configured.", discord.Color.red()); return
@@ -327,8 +353,8 @@ class LastFM(commands.Cog):
     @fm_group.command(name="topartists", aliases=["ta", "tar"])
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def fm_top_artists(self, ctx: commands.Context, member: Optional[discord.Member] = None, period_input: str = "overall", limit: int = 5):
+        # ... (fm_top_artists logic remains the same) ...
         print(f"[LastFM DEBUG fm_top_artists] Command invoked by {ctx.author.name}.")
-        # ... (rest of the command logic is assumed to be okay for now, focusing on .fm main command) ...
         if not self.api_key or not self.db_params:
             await self._send_embed_response(ctx, "Last.fm Error", "Last.fm integration not fully configured.", discord.Color.red())
             return
@@ -367,7 +393,6 @@ class LastFM(commands.Cog):
         description = "\n".join(description_lines) if description_lines else "No top artists found for this period."
         await self._send_embed_response(ctx, embed_title, description, discord.Color.blue(), author_for_embed=target_user)
 
-
     @fm_group.error
     async def fm_group_error(self, ctx, error):
         print(f"[LastFM DEBUG fm_group_error] Error handler triggered: {type(error).__name__} - {error}")
@@ -395,8 +420,7 @@ class LastFM(commands.Cog):
             await self._send_embed_response(ctx, "Database Error", "Could not connect to the database.", discord.Color.red())
         else: await self._send_embed_response(ctx, "Top Artists Error", f"An unexpected error occurred: {error}", discord.Color.red()); print(f"Error in fm_top_artists: {error}"); traceback.print_exc()
 
-
 async def setup(bot: commands.Bot):
     await bot.add_cog(LastFM(bot))
-    print("Cog 'LastFM' (with enhanced debugging for .fm) loaded successfully.")
+    print("Cog 'LastFM' (with further enhanced debugging for .fm) loaded successfully.")
 
