@@ -5,7 +5,7 @@ import psycopg2
 import psycopg2.extras # For dictionary cursor
 import os
 import traceback
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 from urllib.parse import urlparse, quote_plus # For URL encoding
 import aiohttp # For making API requests
 import asyncio # For adding reactions with a small delay
@@ -15,10 +15,9 @@ LASTFM_API_BASE_URL = "http://ws.audioscrobbler.com/2.0/"
 
 class LastFM(commands.Cog):
     """
-    Integrates Last.fm to show what users are listening to.
+    Integrates Last.fm to show what users are listening to, their top artists, etc.
     Last.fm accounts are linked globally per Discord user.
     Requires a LASTFM_API_KEY environment variable.
-    The bot will react to its own .fm messages with up/down arrows.
     """
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -35,7 +34,7 @@ class LastFM(commands.Cog):
             print("ERROR [LastFM Init]: DATABASE_URL environment variable not set. Last.fm cog cannot store usernames.")
         
         self.http_session = aiohttp.ClientSession()
-        print("[LastFM DEBUG] Cog initialized (Global Linking, Embed Updates, Self-React, KeyError Fix).")
+        print("[LastFM DEBUG] Cog initialized (Global Linking, Top Artists, Updated Timeframes).")
 
     async def cog_unload(self):
         """Clean up the aiohttp session when the cog is unloaded."""
@@ -114,13 +113,13 @@ class LastFM(commands.Cog):
         embed = discord.Embed(title=title, description=description, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
         return embed
 
-    async def _send_embed_response(self, ctx: commands.Context, title: str, description: str, color: discord.Color, image_url_for_thumbnail: Optional[str] = None, author_for_embed: Optional[discord.User | discord.Member] = None) -> Optional[discord.Message]:
+    async def _send_embed_response(self, ctx: commands.Context, title: str, description: str, color: discord.Color, image_url_for_thumbnail: Optional[str] = None, author_for_embed: Optional[discord.User | discord.Member] = None, fields: Optional[List[Tuple[str,str]]] = None) -> Optional[discord.Message]:
         utils_cog = self.bot.get_cog('Utils')
         embed: discord.Embed
 
         if utils_cog and hasattr(utils_cog, 'create_embed'):
             embed = utils_cog.create_embed(ctx, title=title, description=description, color=color)
-            if author_for_embed:
+            if author_for_embed: # Ensure author is set even if Utils cog is used
                 display_avatar_url = author_for_embed.display_avatar.url if author_for_embed.avatar else None
                 embed.set_author(name=str(author_for_embed.display_name), icon_url=display_avatar_url)
         else: 
@@ -134,6 +133,10 @@ class LastFM(commands.Cog):
         if image_url_for_thumbnail:
             embed.set_thumbnail(url=image_url_for_thumbnail)
         
+        if fields:
+            for name, value in fields:
+                embed.add_field(name=name, value=value, inline=False)
+        
         try:
             sent_message = await ctx.send(embed=embed)
             return sent_message
@@ -141,28 +144,53 @@ class LastFM(commands.Cog):
             print(f"Error sending embed in _send_embed_response: {e}")
             return None
 
+    async def _get_lastfm_username(self, user_id: int) -> Optional[str]:
+        """Helper to get Last.fm username from DB."""
+        if not self.db_params: return None
+        conn = None
+        try:
+            conn = self._get_db_connection()
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cursor.execute("SELECT lastfm_username FROM lastfm_global_users WHERE user_id = %s", (user_id,))
+            row = cursor.fetchone()
+            return row['lastfm_username'] if row else None
+        except (psycopg2.Error, ConnectionError) as e:
+            print(f"ERROR [LastFM _get_lastfm_username DB]: {e}")
+            return None
+        finally:
+            if conn: cursor.close(); conn.close()
+
+    def _parse_lastfm_period(self, period_input: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Parses user-friendly period input into Last.fm API period string and a display string.
+        Returns (api_period, display_period_name) or (None, None) if invalid.
+        Last.fm API periods: 7day, 1month, 3month, 6month, 12month, overall.
+        """
+        period_input_lower = period_input.lower()
+        
+        if period_input_lower == "overall": return "overall", "Overall"
+        if period_input_lower in ["1d", "day", "24h"]: return "7day", "Last 7 Days (defaulted from 1 Day)" # Last.fm shortest is 7day
+        if period_input_lower in ["7d", "week", "7day"]: return "7day", "Last 7 Days"
+        if period_input_lower in ["30d", "1m", "month", "1month"]: return "1month", "Last Month"
+        if period_input_lower in ["3m", "3months", "3month"]: return "3month", "Last 3 Months"
+        if period_input_lower in ["6m", "6months", "6month"]: return "6month", "Last 6 Months"
+        if period_input_lower in ["1y", "year", "12m", "12months", "12month"]: return "12month", "Last 12 Months"
+        
+        return None, None # Invalid input
+
     @commands.group(name="fm", invoke_without_command=True)
     @commands.cooldown(1, 3, commands.BucketType.user)
     async def fm_group(self, ctx: commands.Context, *, member: Optional[discord.Member] = None):
+        """Shows your or another user's currently playing/last scrobbled track on Last.fm.
+        Use '.fm set <username>' to link your Last.fm account globally.
+        Usage: .fm [@user]
+        """
         if not self.api_key or not self.db_params:
             await self._send_embed_response(ctx, "Last.fm Error", "Last.fm integration is not fully configured on the bot's side.", discord.Color.red())
             return
 
         target_user = member or ctx.author
-        lastfm_username = None
-        conn = None
-        try:
-            conn = self._get_db_connection()
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-            cursor.execute("SELECT lastfm_username FROM lastfm_global_users WHERE user_id = %s", (target_user.id,))
-            row = cursor.fetchone()
-            if row: lastfm_username = row['lastfm_username']
-            cursor.close()
-        except (psycopg2.Error, ConnectionError) as e:
-            await self._send_embed_response(ctx, "Database Error", "Could not retrieve Last.fm username.", discord.Color.red())
-            print(f"ERROR [LastFM fm_group DB]: {e}"); return
-        finally:
-            if conn: conn.close()
+        lastfm_username = await self._get_lastfm_username(target_user.id)
 
         if not lastfm_username:
             is_self = target_user == ctx.author
@@ -180,76 +208,54 @@ class LastFM(commands.Cog):
             return
 
         track_info = data['recenttracks']['track'][0]
-        
         track_name = track_info.get('name', "Unknown Track")
-        
         artist_data = track_info.get('artist', {})
-        artist_name = artist_data.get('#text', "Unknown Artist") if isinstance(artist_data, dict) else \
-                      artist_data if isinstance(artist_data, str) else "Unknown Artist"
-
+        artist_name = artist_data.get('#text', "Unknown Artist") if isinstance(artist_data, dict) else artist_data if isinstance(artist_data, str) else "Unknown Artist"
         album_data = track_info.get('album', {})
-        album_name = album_data.get('#text', "Unknown Album") if isinstance(album_data, dict) else \
-                     album_data if isinstance(album_data, str) else "Unknown Album"
+        album_name = album_data.get('#text', "Unknown Album") if isinstance(album_data, dict) else album_data if isinstance(album_data, str) else "Unknown Album"
         
         image_url = None 
-        for img in track_info.get('image', []): # Iterate safely
+        for img in track_info.get('image', []): 
             if isinstance(img, dict) and img.get('size') == 'extralarge' and img.get('#text'): image_url = img['#text']; break
             elif isinstance(img, dict) and img.get('size') == 'large' and img.get('#text'): image_url = img['#text'] 
         if not image_url and track_info.get('image'): 
-            largest_image = None
-            size_order = ['mega', 'extralarge', 'large', 'medium', 'small', ''] 
+            largest_image = None; size_order = ['mega', 'extralarge', 'large', 'medium', 'small', ''] 
             for size_key in size_order:
                 for img in track_info.get('image', []):
-                    if isinstance(img, dict) and img.get('size') == size_key and img.get('#text'):
-                        largest_image = img['#text']; break
+                    if isinstance(img, dict) and img.get('size') == size_key and img.get('#text'): largest_image = img['#text']; break
                 if largest_image: break
             image_url = largest_image
 
         is_now_playing = track_info.get('@attr', {}).get('nowplaying') == 'true'
-        
-        # Updated title and status text
-        embed_title = f"🎧 Last.fm for {lastfm_username}" # Simplified title
-        
+        embed_title = f"🎧 Last.fm for {lastfm_username}"
         description = f"**Track:** [{track_name}]({track_info.get('url', '#')})\n" \
                       f"**Artist:** {artist_name}\n"
-        if album_name and album_name != "Unknown Album": 
-            description += f"**Album:** {album_name}\n"
+        if album_name and album_name != "Unknown Album": description += f"**Album:** {album_name}\n"
         
-        if is_now_playing:
-            description += f"\n*Scrobbled: just now*" # Changed text
+        if is_now_playing: description += f"\n*Scrobbled: just now*"
         else:
             scrobble_date_uts = track_info.get('date', {}).get('uts')
             if scrobble_date_uts:
                 try:
                     scrobble_datetime = datetime.datetime.fromtimestamp(int(scrobble_date_uts), tz=datetime.timezone.utc)
                     description += f"\n*Scrobbled: {discord.utils.format_dt(scrobble_datetime, style='R')}*"
-                except ValueError:
-                    description += f"\n*Scrobbled: Invalid date from API*"
-            else:
-                description += "\n*Scrobble time not available*"
-
+                except ValueError: description += f"\n*Scrobbled: Invalid date from API*"
+            else: description += "\n*Scrobble time not available*"
 
         sent_message = await self._send_embed_response(
-            ctx, title=embed_title, description=description, 
-            color=discord.Color.red(), 
-            image_url_for_thumbnail=image_url, 
-            author_for_embed=target_user
+            ctx, title=embed_title, description=description, color=discord.Color.red(), 
+            image_url_for_thumbnail=image_url, author_for_embed=target_user
         )
-            
         if sent_message:
             try:
-                await sent_message.add_reaction("⬆️")
-                await asyncio.sleep(0.1) 
-                await sent_message.add_reaction("⬇️")
-            except discord.Forbidden:
-                print(f"[LastFM DEBUG] Bot missing 'Add Reactions' permission in channel {ctx.channel.name} to react to its own message.")
-            except Exception as e:
-                print(f"[LastFM DEBUG] Error adding reactions to own message: {e}")
+                await sent_message.add_reaction("⬆️"); await asyncio.sleep(0.1); await sent_message.add_reaction("⬇️")
+            except discord.Forbidden: print(f"[LastFM DEBUG] Bot missing 'Add Reactions' in {ctx.channel.name}.")
+            except Exception as e: print(f"[LastFM DEBUG] Error adding reactions: {e}")
 
     @fm_group.command(name="set")
     async def fm_set(self, ctx: commands.Context, lastfm_username: str):
         if not self.db_params or not self.api_key:
-            await self._send_embed_response(ctx, "Configuration Error", "Last.fm integration is not fully configured.", discord.Color.red())
+            await self._send_embed_response(ctx, "Configuration Error", "Last.fm integration not fully configured.", discord.Color.red())
             return
 
         validation_params = {"method": "user.getinfo", "user": lastfm_username}
@@ -268,8 +274,7 @@ class LastFM(commands.Cog):
                 VALUES (%s, %s, %s)
                 ON CONFLICT (user_id) DO UPDATE SET lastfm_username = EXCLUDED.lastfm_username, linked_at = EXCLUDED.linked_at
             """, (ctx.author.id, lastfm_username, datetime.datetime.now(datetime.timezone.utc)))
-            conn.commit()
-            cursor.close()
+            conn.commit(); cursor.close()
             await self._send_embed_response(ctx, "Last.fm Account Set", f"Your Last.fm username has been globally set to **{lastfm_username}**.", discord.Color.green())
         except (psycopg2.Error, ConnectionError) as e:
             await self._send_embed_response(ctx, "Database Error", "Failed to save your Last.fm username.", discord.Color.red())
@@ -287,18 +292,86 @@ class LastFM(commands.Cog):
             conn = self._get_db_connection()
             cursor = conn.cursor()
             cursor.execute("DELETE FROM lastfm_global_users WHERE user_id = %s", (ctx.author.id,))
-            deleted_rows = cursor.rowcount
-            conn.commit()
-            cursor.close()
-            if deleted_rows > 0:
-                await self._send_embed_response(ctx, "Last.fm Account Removed", "Your globally linked Last.fm username has been removed.", discord.Color.orange())
-            else:
-                await self._send_embed_response(ctx, "Last.fm Account Not Set", "You don't have a Last.fm username set with this bot.", discord.Color.blue())
+            deleted_rows = cursor.rowcount; conn.commit(); cursor.close()
+            if deleted_rows > 0: await self._send_embed_response(ctx, "Last.fm Account Removed", "Your globally linked Last.fm username has been removed.", discord.Color.orange())
+            else: await self._send_embed_response(ctx, "Last.fm Account Not Set", "You don't have a Last.fm username set.", discord.Color.blue())
         except (psycopg2.Error, ConnectionError) as e:
             await self._send_embed_response(ctx, "Database Error", "Failed to remove your Last.fm username.", discord.Color.red())
             print(f"ERROR [LastFM fm_remove DB]: {e}")
         finally:
             if conn: conn.close()
+
+    @fm_group.command(name="topartists", aliases=["ta", "tar"]) # Added "tar" alias
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def fm_top_artists(self, ctx: commands.Context, member: Optional[discord.Member] = None, period_input: str = "overall", limit: int = 5):
+        """
+        Shows a user's top artists from Last.fm.
+        Periods: 1d/day/24h (defaults to 7day), 7d/week, 30d/1m/month, 3m, 6m, 1y/12m/year, overall (default)
+        Limit: Number of artists to show (default 5, max 15)
+        Usage: .fm topartists [@user] [period] [limit]
+        Example: .fm tar @User 1m 10
+        """
+        if not self.api_key or not self.db_params:
+            await self._send_embed_response(ctx, "Last.fm Error", "Last.fm integration not fully configured.", discord.Color.red())
+            return
+
+        target_user = member or ctx.author
+        lastfm_username = await self._get_lastfm_username(target_user.id)
+
+        if not lastfm_username:
+            is_self = target_user == ctx.author
+            msg = f"You need to set your Last.fm username first with `.fm set <username>`." if is_self \
+                  else f"{target_user.display_name} has not set their Last.fm username."
+            await self._send_embed_response(ctx, "Last.fm Account Not Set", msg, discord.Color.orange())
+            return
+
+        api_period, display_period_name = self._parse_lastfm_period(period_input)
+        if not api_period:
+            valid_periods_display = "overall, 1d/day/24h, 7d/week, 1m/30d/month, 3m, 6m, 1y/12m/year"
+            await self._send_embed_response(ctx, "Invalid Period", f"Invalid period. Valid periods are: {valid_periods_display}.", discord.Color.red())
+            return
+        
+        if not (1 <= limit <= 15): # Max limit for Last.fm API for top artists is often higher, but 15 is reasonable for an embed
+            await self._send_embed_response(ctx, "Invalid Limit", "Limit must be between 1 and 15.", discord.Color.red())
+            return
+
+        params = {
+            "method": "user.gettopartists",
+            "user": lastfm_username,
+            "period": api_period,
+            "limit": limit
+        }
+        data = await self._call_lastfm_api(params)
+
+        if not data or 'topartists' not in data or not data['topartists'].get('artist'):
+            error_msg = data.get('message', f"Could not fetch top artists for '{lastfm_username}' (period: {display_period_name}).") if data and 'error' in data else f"Could not fetch top artists for '{lastfm_username}' (period: {display_period_name})."
+            await self._send_embed_response(ctx, "Last.fm Error", error_msg, discord.Color.red())
+            return
+        
+        artists_data = data['topartists']['artist']
+        # Ensure artists_data is always a list, even if API returns a single dict for one artist
+        if not isinstance(artists_data, list):
+            artists_data = [artists_data] if artists_data else []
+
+
+        embed_title = f"Top Artists for {lastfm_username} ({display_period_name})"
+        
+        description_lines = []
+        if artists_data:
+            for i, artist_info in enumerate(artists_data):
+                if not isinstance(artist_info, dict): continue # Skip if malformed
+                artist_name = artist_info.get('name', 'Unknown Artist')
+                play_count = artist_info.get('playcount', 'N/A')
+                artist_url = artist_info.get('url', '#')
+                description_lines.append(f"{i+1}. [{artist_name}]({artist_url}) - **{play_count}** plays")
+        
+        if not description_lines:
+            description = f"No top artists found for this period."
+        else:
+            description = "\n".join(description_lines)
+
+        await self._send_embed_response(ctx, embed_title, description, discord.Color.blue(), author_for_embed=target_user)
+
 
     @fm_group.error
     async def fm_group_error(self, ctx, error):
@@ -315,7 +388,17 @@ class LastFM(commands.Cog):
             await self._send_embed_response(ctx, "Missing Username", "Provide username. Usage: `.fm set YourUsername`", discord.Color.red())
         else: await self._send_embed_response(ctx, "Set Last.fm Error", f"Unexpected error: {error}", discord.Color.red()); print(f"Error in fm_set: {error}"); traceback.print_exc()
 
+    @fm_top_artists.error
+    async def fm_top_artists_error(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown): await self._send_embed_response(ctx, "Cooldown", f"Command on cooldown. Try again in {error.retry_after:.2f}s.", discord.Color.orange())
+        elif isinstance(error, commands.MemberNotFound): await self._send_embed_response(ctx, "User Not Found", f"Could not find user: {error.argument}", discord.Color.red())
+        elif isinstance(error, commands.BadArgument): await self._send_embed_response(ctx, "Invalid Argument", "Please provide a valid number for the limit, or a valid period.", discord.Color.red())
+        elif isinstance(error, commands.CommandInvokeError) and isinstance(error.original, ConnectionError):
+            await self._send_embed_response(ctx, "Database Error", "Could not connect to the database.", discord.Color.red())
+        else: await self._send_embed_response(ctx, "Top Artists Error", f"An unexpected error occurred: {error}", discord.Color.red()); print(f"Error in fm_top_artists: {error}"); traceback.print_exc()
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(LastFM(bot))
-    print("Cog 'LastFM' (Global Linking, Updated Now Playing Text) loaded successfully.")
+    print("Cog 'LastFM' (with Top Artists & updated timeframes) loaded successfully.")
 
