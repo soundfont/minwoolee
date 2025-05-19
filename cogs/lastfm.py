@@ -5,7 +5,7 @@ import psycopg2
 import psycopg2.extras # For dictionary cursor
 import os
 import traceback
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 from urllib.parse import urlparse, quote_plus # For URL encoding
 import aiohttp # For making API requests
 import asyncio # For adding reactions with a small delay
@@ -34,7 +34,7 @@ class LastFM(commands.Cog):
             print("ERROR [LastFM Init]: DATABASE_URL environment variable not set. Last.fm cog cannot store usernames.")
         
         self.http_session = aiohttp.ClientSession()
-        print("[LastFM DEBUG] Cog initialized (Global Linking, Top Artists, Updated Timeframes).")
+        print("[LastFM DEBUG] Cog initialized (Global Linking, Top Artists, Updated Timeframes, Robust Artist/Album Parse).")
 
     async def cog_unload(self):
         """Clean up the aiohttp session when the cog is unloaded."""
@@ -119,7 +119,7 @@ class LastFM(commands.Cog):
 
         if utils_cog and hasattr(utils_cog, 'create_embed'):
             embed = utils_cog.create_embed(ctx, title=title, description=description, color=color)
-            if author_for_embed: # Ensure author is set even if Utils cog is used
+            if author_for_embed: 
                 display_avatar_url = author_for_embed.display_avatar.url if author_for_embed.avatar else None
                 embed.set_author(name=str(author_for_embed.display_name), icon_url=display_avatar_url)
         else: 
@@ -161,30 +161,19 @@ class LastFM(commands.Cog):
             if conn: cursor.close(); conn.close()
 
     def _parse_lastfm_period(self, period_input: str) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Parses user-friendly period input into Last.fm API period string and a display string.
-        Returns (api_period, display_period_name) or (None, None) if invalid.
-        Last.fm API periods: 7day, 1month, 3month, 6month, 12month, overall.
-        """
         period_input_lower = period_input.lower()
-        
         if period_input_lower == "overall": return "overall", "Overall"
-        if period_input_lower in ["1d", "day", "24h"]: return "7day", "Last 7 Days (defaulted from 1 Day)" # Last.fm shortest is 7day
+        if period_input_lower in ["1d", "day", "24h"]: return "7day", "Last 7 Days (defaulted from 1 Day)"
         if period_input_lower in ["7d", "week", "7day"]: return "7day", "Last 7 Days"
         if period_input_lower in ["30d", "1m", "month", "1month"]: return "1month", "Last Month"
         if period_input_lower in ["3m", "3months", "3month"]: return "3month", "Last 3 Months"
         if period_input_lower in ["6m", "6months", "6month"]: return "6month", "Last 6 Months"
         if period_input_lower in ["1y", "year", "12m", "12months", "12month"]: return "12month", "Last 12 Months"
-        
-        return None, None # Invalid input
+        return None, None
 
     @commands.group(name="fm", invoke_without_command=True)
     @commands.cooldown(1, 3, commands.BucketType.user)
     async def fm_group(self, ctx: commands.Context, *, member: Optional[discord.Member] = None):
-        """Shows your or another user's currently playing/last scrobbled track on Last.fm.
-        Use '.fm set <username>' to link your Last.fm account globally.
-        Usage: .fm [@user]
-        """
         if not self.api_key or not self.db_params:
             await self._send_embed_response(ctx, "Last.fm Error", "Last.fm integration is not fully configured on the bot's side.", discord.Color.red())
             return
@@ -208,11 +197,34 @@ class LastFM(commands.Cog):
             return
 
         track_info = data['recenttracks']['track'][0]
+        
         track_name = track_info.get('name', "Unknown Track")
-        artist_data = track_info.get('artist', {})
-        artist_name = artist_data.get('#text', "Unknown Artist") if isinstance(artist_data, dict) else artist_data if isinstance(artist_data, str) else "Unknown Artist"
-        album_data = track_info.get('album', {})
-        album_name = album_data.get('#text', "Unknown Album") if isinstance(album_data, dict) else album_data if isinstance(album_data, str) else "Unknown Album"
+        
+        # --- More Robust Artist Name Parsing ---
+        artist_name = "Unknown Artist" # Default
+        artist_data_raw = track_info.get('artist')
+        if isinstance(artist_data_raw, dict):
+            artist_name = artist_data_raw.get('#text', artist_name) # Use default if #text is missing
+            if artist_name == "Unknown Artist" and '#text' not in artist_data_raw:
+                 print(f"[LastFM DEBUG fm_group] Artist data for track '{track_name}' was a dict but missing '#text': {artist_data_raw}")
+        elif isinstance(artist_data_raw, str) and artist_data_raw.strip(): # If it's just a string name
+            artist_name = artist_data_raw
+        else: # artist_data is None or some other unexpected type
+            print(f"[LastFM DEBUG fm_group] Artist data for track '{track_name}' was not a dict or string: {type(artist_data_raw)} - {artist_data_raw}")
+        # --- End Robust Artist Name Parsing ---
+        
+        # --- More Robust Album Name Parsing ---
+        album_name = "Unknown Album" # Default
+        album_data_raw = track_info.get('album')
+        if isinstance(album_data_raw, dict):
+            album_name = album_data_raw.get('#text', album_name)
+            if album_name == "Unknown Album" and '#text' not in album_data_raw:
+                print(f"[LastFM DEBUG fm_group] Album data for track '{track_name}' was a dict but missing '#text': {album_data_raw}")
+        elif isinstance(album_data_raw, str) and album_data_raw.strip():
+            album_name = album_data_raw
+        else:
+            print(f"[LastFM DEBUG fm_group] Album data for track '{track_name}' was not a dict or string: {type(album_data_raw)} - {album_data_raw}")
+        # --- End Robust Album Name Parsing ---
         
         image_url = None 
         for img in track_info.get('image', []): 
@@ -229,8 +241,9 @@ class LastFM(commands.Cog):
         is_now_playing = track_info.get('@attr', {}).get('nowplaying') == 'true'
         embed_title = f"🎧 Last.fm for {lastfm_username}"
         description = f"**Track:** [{track_name}]({track_info.get('url', '#')})\n" \
-                      f"**Artist:** {artist_name}\n"
-        if album_name and album_name != "Unknown Album": description += f"**Album:** {album_name}\n"
+                      f"**Artist:** {artist_name}\n" # Uses the robustly parsed artist_name
+        if album_name and album_name != "Unknown Album": 
+            description += f"**Album:** {album_name}\n" # Uses the robustly parsed album_name
         
         if is_now_playing: description += f"\n*Scrobbled: just now*"
         else:
@@ -255,7 +268,7 @@ class LastFM(commands.Cog):
     @fm_group.command(name="set")
     async def fm_set(self, ctx: commands.Context, lastfm_username: str):
         if not self.db_params or not self.api_key:
-            await self._send_embed_response(ctx, "Configuration Error", "Last.fm integration not fully configured.", discord.Color.red())
+            await self._send_embed_response(ctx, "Configuration Error", "Last.fm integration is not fully configured.", discord.Color.red())
             return
 
         validation_params = {"method": "user.getinfo", "user": lastfm_username}
@@ -301,16 +314,9 @@ class LastFM(commands.Cog):
         finally:
             if conn: conn.close()
 
-    @fm_group.command(name="topartists", aliases=["ta", "tar"]) # Added "tar" alias
+    @fm_group.command(name="topartists", aliases=["ta", "tar"])
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def fm_top_artists(self, ctx: commands.Context, member: Optional[discord.Member] = None, period_input: str = "overall", limit: int = 5):
-        """
-        Shows a user's top artists from Last.fm.
-        Periods: 1d/day/24h (defaults to 7day), 7d/week, 30d/1m/month, 3m, 6m, 1y/12m/year, overall (default)
-        Limit: Number of artists to show (default 5, max 15)
-        Usage: .fm topartists [@user] [period] [limit]
-        Example: .fm tar @User 1m 10
-        """
         if not self.api_key or not self.db_params:
             await self._send_embed_response(ctx, "Last.fm Error", "Last.fm integration not fully configured.", discord.Color.red())
             return
@@ -331,16 +337,11 @@ class LastFM(commands.Cog):
             await self._send_embed_response(ctx, "Invalid Period", f"Invalid period. Valid periods are: {valid_periods_display}.", discord.Color.red())
             return
         
-        if not (1 <= limit <= 15): # Max limit for Last.fm API for top artists is often higher, but 15 is reasonable for an embed
+        if not (1 <= limit <= 15): 
             await self._send_embed_response(ctx, "Invalid Limit", "Limit must be between 1 and 15.", discord.Color.red())
             return
 
-        params = {
-            "method": "user.gettopartists",
-            "user": lastfm_username,
-            "period": api_period,
-            "limit": limit
-        }
+        params = {"method": "user.gettopartists", "user": lastfm_username, "period": api_period, "limit": limit}
         data = await self._call_lastfm_api(params)
 
         if not data or 'topartists' not in data or not data['topartists'].get('artist'):
@@ -349,29 +350,20 @@ class LastFM(commands.Cog):
             return
         
         artists_data = data['topartists']['artist']
-        # Ensure artists_data is always a list, even if API returns a single dict for one artist
-        if not isinstance(artists_data, list):
-            artists_data = [artists_data] if artists_data else []
-
+        if not isinstance(artists_data, list): artists_data = [artists_data] if artists_data else []
 
         embed_title = f"Top Artists for {lastfm_username} ({display_period_name})"
-        
         description_lines = []
         if artists_data:
             for i, artist_info in enumerate(artists_data):
-                if not isinstance(artist_info, dict): continue # Skip if malformed
-                artist_name = artist_info.get('name', 'Unknown Artist')
+                if not isinstance(artist_info, dict): continue 
+                artist_name_val = artist_info.get('name', 'Unknown Artist') # Use .get() for safety
                 play_count = artist_info.get('playcount', 'N/A')
                 artist_url = artist_info.get('url', '#')
-                description_lines.append(f"{i+1}. [{artist_name}]({artist_url}) - **{play_count}** plays")
+                description_lines.append(f"{i+1}. [{artist_name_val}]({artist_url}) - **{play_count}** plays")
         
-        if not description_lines:
-            description = f"No top artists found for this period."
-        else:
-            description = "\n".join(description_lines)
-
+        description = "\n".join(description_lines) if description_lines else "No top artists found for this period."
         await self._send_embed_response(ctx, embed_title, description, discord.Color.blue(), author_for_embed=target_user)
-
 
     @fm_group.error
     async def fm_group_error(self, ctx, error):
@@ -397,8 +389,7 @@ class LastFM(commands.Cog):
             await self._send_embed_response(ctx, "Database Error", "Could not connect to the database.", discord.Color.red())
         else: await self._send_embed_response(ctx, "Top Artists Error", f"An unexpected error occurred: {error}", discord.Color.red()); print(f"Error in fm_top_artists: {error}"); traceback.print_exc()
 
-
 async def setup(bot: commands.Bot):
     await bot.add_cog(LastFM(bot))
-    print("Cog 'LastFM' (with Top Artists & updated timeframes) loaded successfully.")
+    print("Cog 'LastFM' (with Top Artists & updated timeframes & robust parsing) loaded successfully.")
 
