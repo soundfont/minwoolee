@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any, List, Tuple
 from urllib.parse import urlparse, quote_plus # For URL encoding
 import aiohttp # For making API requests
 import asyncio # For adding reactions with a small delay
-import json # <<< IMPORT ADDED HERE
+import json
 
 # --- Last.fm API Configuration ---
 LASTFM_API_BASE_URL = "http://ws.audioscrobbler.com/2.0/"
@@ -37,7 +37,7 @@ class LastFM(commands.Cog):
             print("ERROR [LastFM Init]: DATABASE_URL environment variable not set. Last.fm cog cannot store usernames.")
         
         self.http_session = aiohttp.ClientSession()
-        print("[LastFM DEBUG __init__] Cog initialized (Fixed NameError & Debugging).")
+        print("[LastFM DEBUG __init__] Cog initialized (Final Artist/Album Parsing Refinements).")
 
     async def cog_unload(self):
         await self.http_session.close()
@@ -97,7 +97,7 @@ class LastFM(commands.Cog):
             async with self.http_session.get(request_url, params=params) as response:
                 print(f"[LastFM DEBUG _call_lastfm_api] Response status: {response.status}")
                 if response.status == 200:
-                    data = await response.json() # This uses aiohttp's built-in JSON decoder
+                    data = await response.json() 
                     if 'error' in data:
                         print(f"ERROR [LastFM API Call]: {data.get('message', 'Unknown API error')} (Code: {data.get('error')}) for user {params.get('user', 'N/A')}")
                         return data 
@@ -230,13 +230,14 @@ class LastFM(commands.Cog):
         print(f"[LastFM DEBUG fm_group] Full track_info received: {json.dumps(track_info, indent=2)}") 
         
         track_name = track_info.get('name', "Unknown Track")
+        if not track_name or not str(track_name).strip(): track_name = "Unknown Track" # Ensure not empty
         
         artist_name = "Unknown Artist" 
         artist_data_raw = track_info.get('artist')
-        print(f"[LastFM DEBUG fm_group] Raw artist data: {artist_data_raw} (type: {type(artist_data_raw)})")
+        print(f"[LastFM DEBUG fm_group] Raw artist data for track '{track_name}': {artist_data_raw} (type: {type(artist_data_raw)})")
         if isinstance(artist_data_raw, dict):
             artist_name_candidate = artist_data_raw.get('#text')
-            if artist_name_candidate and artist_name_candidate.strip(): 
+            if isinstance(artist_name_candidate, str) and artist_name_candidate.strip(): 
                 artist_name = artist_name_candidate
         elif isinstance(artist_data_raw, str) and artist_data_raw.strip(): 
             artist_name = artist_data_raw
@@ -244,23 +245,23 @@ class LastFM(commands.Cog):
             first_artist_entry = artist_data_raw[0]
             if isinstance(first_artist_entry, dict):
                 artist_name_candidate = first_artist_entry.get('#text')
-                if artist_name_candidate and artist_name_candidate.strip():
+                if isinstance(artist_name_candidate, str) and artist_name_candidate.strip():
                     artist_name = artist_name_candidate
             elif isinstance(first_artist_entry, str) and first_artist_entry.strip():
                 artist_name = first_artist_entry
-            print(f"[LastFM DEBUG fm_group] Artist data was a list, used first artist: {artist_name}")
-        print(f"[LastFM DEBUG fm_group] Final determined artist_name: '{artist_name}'")
+            print(f"[LastFM DEBUG fm_group] Artist data was a list, used first artist: '{artist_name}'")
+        print(f"[LastFM DEBUG fm_group] Final determined artist_name for '{track_name}': '{artist_name}'")
         
         album_name = "Unknown Album" 
         album_data_raw = track_info.get('album')
-        print(f"[LastFM DEBUG fm_group] Raw album data: {album_data_raw} (type: {type(album_data_raw)})")
+        print(f"[LastFM DEBUG fm_group] Raw album data for track '{track_name}': {album_data_raw} (type: {type(album_data_raw)})")
         if isinstance(album_data_raw, dict):
             album_name_candidate = album_data_raw.get('#text')
-            if album_name_candidate and album_name_candidate.strip():
+            if isinstance(album_name_candidate, str) and album_name_candidate.strip():
                 album_name = album_name_candidate
         elif isinstance(album_data_raw, str) and album_data_raw.strip():
             album_name = album_data_raw
-        print(f"[LastFM DEBUG fm_group] Final determined album_name: '{album_name}'")
+        print(f"[LastFM DEBUG fm_group] Final determined album_name for '{track_name}': '{album_name}'")
         
         image_url = None 
         for img in track_info.get('image', []): 
@@ -301,6 +302,8 @@ class LastFM(commands.Cog):
             except discord.Forbidden: print(f"[LastFM DEBUG] Bot missing 'Add Reactions' in {ctx.channel.name}.")
             except Exception as e: print(f"[LastFM DEBUG] Error adding reactions: {e}")
 
+    # --- fm_set, fm_remove, fm_top_artists, and error handlers remain the same ---
+    # (Code for these subcommands and their error handlers is omitted for brevity but assumed to be the same as the previous version)
     @fm_group.command(name="set")
     async def fm_set(self, ctx: commands.Context, lastfm_username: str):
         print(f"[LastFM DEBUG fm_set] Command invoked by {ctx.author.name} to set username to '{lastfm_username}'.")
@@ -332,6 +335,7 @@ class LastFM(commands.Cog):
             print(f"ERROR [LastFM fm_set DB]: {e}")
         finally:
             if conn: conn.close()
+
 
     @fm_group.command(name="remove", aliases=["unset"])
     async def fm_remove(self, ctx: commands.Context):
