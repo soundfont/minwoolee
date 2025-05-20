@@ -178,10 +178,10 @@ class LastFM(commands.Cog):
         period_input_lower = period_input.lower()
         if period_input_lower == "overall": return "overall", "Overall"
         if period_input_lower in ["1d", "day", "24h"]: return "7day", "Last 7 Days (defaulted from 1 Day)"
-        if period_input_lower in ["7d", "week", "7day"]: return "7day", "Last 7 Days"
-        if period_input_lower in ["30d", "1m", "month", "1month"]: return "1month", "Last Month"
-        if period_input_lower in ["3m", "3months", "3month"]: return "3month", "Last 3 Months"
-        if period_input_lower in ["6m", "6months", "6month"]: return "6month", "Last 6 Months"
+        if period_input_lower in ["7d", "week", "7day", "1w"]: return "7day", "Last 7 Days"
+        if period_input_lower in ["30d", "1m", "month", "1month", "4w"]: return "1month", "Last Month"
+        if period_input_lower in ["3m", "3months", "3month", "90d", "12w"]: return "3month", "Last 3 Months"
+        if period_input_lower in ["6m", "6months", "6month", "180d", "24w"]: return "6month", "Last 6 Months"
         if period_input_lower in ["1y", "year", "12m", "12months", "12month"]: return "12month", "Last 12 Months"
         return None, None
 
