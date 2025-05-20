@@ -183,7 +183,7 @@ class LastFM(commands.Cog, name="Last.fm"):
         Use subcommands like .fm set, .fm topartists, .fm collage.
         Usage: .fm [@user]
         """
-        if ctx.invoked_subcommand is None: # Default action: show now playing
+        if ctx.invoked_subcommand is None: 
             print(f"[LastFM DEBUG fm_group - NowPlaying] Invoked by {ctx.author.name} for {member.name if member else ctx.author.name}.")
             if not self.api_key or not self.db_params:
                 await self._send_fm_embed(ctx, "Last.fm Error", "Integration not fully configured.", discord.Color.red()); return
@@ -214,7 +214,6 @@ class LastFM(commands.Cog, name="Last.fm"):
             
             artist_name = "Unknown Artist" 
             artist_data_raw = track_info.get('artist')
-            # print(f"[LastFM DEBUG fm_group] Raw artist data for '{track_name}': {artist_data_raw} (type: {type(artist_data_raw)})")
             if isinstance(artist_data_raw, dict):
                 artist_name_candidate = artist_data_raw.get('name') 
                 if isinstance(artist_name_candidate, str) and artist_name_candidate.strip(): artist_name = artist_name_candidate
@@ -223,7 +222,6 @@ class LastFM(commands.Cog, name="Last.fm"):
                 first_artist_entry = artist_data_raw[0]
                 if isinstance(first_artist_entry, dict): artist_name_candidate = first_artist_entry.get('name'); artist_name = artist_name_candidate if isinstance(artist_name_candidate, str) and artist_name_candidate.strip() else artist_name
                 elif isinstance(first_artist_entry, str) and first_artist_entry.strip(): artist_name = first_artist_entry
-            # print(f"[LastFM DEBUG fm_group] Final artist_name for '{track_name}': '{artist_name}'")
             
             album_name = "Unknown Album" 
             album_data_raw = track_info.get('album')
@@ -259,8 +257,7 @@ class LastFM(commands.Cog, name="Last.fm"):
             if sent_message:
                 try: await sent_message.add_reaction("⬆️"); await asyncio.sleep(0.1); await sent_message.add_reaction("⬇️")
                 except Exception as e: print(f"[LastFM DEBUG] Error adding reactions: {e}")
-        # If a subcommand was invoked, the group itself doesn't send the default help.
-        elif ctx.invoked_subcommand is None : # Should already be handled by invoke_without_command=True default logic
+        elif ctx.invoked_subcommand is None :
              await ctx.send_help(ctx.command)
 
 
@@ -323,7 +320,7 @@ class LastFM(commands.Cog, name="Last.fm"):
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def fm_collage(self, ctx: commands.Context, member: Optional[discord.Member] = None, period_input: str = "overall", grid_size_str: str = "3x3"):
         if not PILLOW_AVAILABLE:
-            await self._send_fm_embed(self.bot, ctx, "Feature Disabled", "The Pillow image library is not installed on the bot. Album collage feature is unavailable.", discord.Color.red())
+            await self._send_fm_embed(ctx, "Feature Disabled", "The Pillow image library is not installed on the bot. Album collage feature is unavailable.", discord.Color.red()) # Corrected call
             return
         if not self.api_key or not self.db_params:
             await self._send_fm_embed(ctx, "Last.fm Error", "Integration not configured.", discord.Color.red()); return
@@ -357,10 +354,10 @@ class LastFM(commands.Cog, name="Last.fm"):
         if not albums_data: await self._send_fm_embed(ctx, "No Albums", f"No top albums found for '{display_period_name}'.", discord.Color.orange()); return
 
         image_urls = []
-        for album_info in albums_data[:num_albums]: # Ensure we only process up to num_albums
+        for album_info in albums_data[:num_albums]: 
             if not isinstance(album_info, dict): continue
             art_url = None
-            for img_dict in reversed(album_info.get('image', [])): # largest first
+            for img_dict in reversed(album_info.get('image', [])): 
                 if isinstance(img_dict, dict) and img_dict.get('#text'): art_url = img_dict['#text']; break
             image_urls.append(art_url if art_url and art_url.strip() else self.user_placeholder_album_art)
         
@@ -412,7 +409,6 @@ class LastFM(commands.Cog, name="Last.fm"):
 
 
 async def setup(bot: commands.Bot):
-    # Ensure Pillow is imported if PILLOW_AVAILABLE is True, or handle its absence for collage
     if PILLOW_AVAILABLE:
         print("Pillow library found, collage command will be available.")
     else:
