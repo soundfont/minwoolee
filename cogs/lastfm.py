@@ -5,7 +5,7 @@ import psycopg2
 import psycopg2.extras # For dictionary cursor
 import os
 import traceback
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Union
 from urllib.parse import urlparse, quote_plus # For URL encoding
 import aiohttp # For making API requests
 import asyncio # For adding reactions with a small delay
