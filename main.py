@@ -3,41 +3,66 @@ from discord.ext import commands
 import os
 import asyncio
 import traceback
-from custom_context import EmbedContext  # import the custom context
 
 # Initialize bot with . prefix, intents, and no default help command
 intents = discord.Intents.default()
-intents.message_content = True # You likely have this
-intents.members = True         # ESSENTIAL for member info and some events
-intents.voice_states = True    # ESSENTIAL for on_voice_state_update
+intents.message_content = True
+intents.members = True         # For Last.fm, AutoRole, etc.
+intents.reactions = True       # For ReactionStats
+intents.voice_states = True    # For VoiceMaster
 
-# Use the custom EmbedContext class
-bot = commands.Bot(command_prefix='.', intents=intents, help_command=None, context_class=EmbedContext)
+bot = commands.Bot(command_prefix='.', intents=intents, help_command=None)
 
-# Load cogs
+# Updated Load cogs function
 async def load_cogs():
     print("Starting to load cogs...")
-    for filename in os.listdir('./cogs'):
-        if filename.endswith('.py'):
-            try:
-                await bot.load_extension(f'cogs.{filename[:-3]}')
-                print(f'Successfully loaded cog: {filename[:-3]}')
-            except Exception as e:
-                print(f'Failed to load cog {filename[:-3]}: {str(e)}')
-                traceback.print_exc()
+    cogs_path = './cogs'
+    for item in os.listdir(cogs_path):
+        item_path = os.path.join(cogs_path, item)
+        if os.path.isfile(item_path) and item.endswith('.py'):
+            # Load cogs directly in the ./cogs directory
+            if item != "__init__.py": # Avoid trying to load __init__.py as a cog
+                try:
+                    await bot.load_extension(f'cogs.{item[:-3]}')
+                    print(f'Successfully loaded cog: cogs.{item[:-3]}')
+                except Exception as e:
+                    print(f'Failed to load cog cogs.{item[:-3]}: {str(e)}')
+                    traceback.print_exc()
+        elif os.path.isdir(item_path):
+            # Load cogs from subdirectories (like cogs/lastfm/)
+            for sub_item in os.listdir(item_path):
+                if sub_item.endswith('.py') and sub_item != "__init__.py":
+                    try:
+                        extension_path = f'cogs.{item}.{sub_item[:-3]}'
+                        await bot.load_extension(extension_path)
+                        print(f'Successfully loaded cog: {extension_path}')
+                    except Exception as e:
+                        print(f'Failed to load cog {extension_path}: {str(e)}')
+                        traceback.print_exc()
 
 # Bot ready event
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user.name}')
-    await load_cogs()
+    print(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
+    print(f'Discord.py Version: {discord.__version__}')
+    await load_cogs() # Call the updated load_cogs
 
-# Run bot using Heroku config var
+# Run bot
 async def main():
+    # from dotenv import load_dotenv # If using dotenv for local dev
+    # load_dotenv()
     token = os.getenv('DISCORD_BOT_TOKEN')
     if not token:
-        raise ValueError("DISCORD_TOKEN environment variable not set")
-    await bot.start(token)
+        print("ERROR: DISCORD_BOT_TOKEN environment variable not set.")
+        return
+    
+    try:
+        await bot.start(token)
+    except discord.LoginFailure:
+        print("ERROR: Failed to log in. Check your bot token.")
+    except Exception as e:
+        print(f"ERROR: An unexpected error occurred during bot startup: {e}")
+        traceback.print_exc()
 
 if __name__ == "__main__":
     asyncio.run(main())
