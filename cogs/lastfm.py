@@ -184,6 +184,7 @@ class LastFM(commands.Cog, name="Last.fm"):
         Usage: .fm [@user]
         """
         if ctx.invoked_subcommand is None: 
+            # ... (Now Playing logic - same as before) ...
             print(f"[LastFM DEBUG fm_group - NowPlaying] Invoked by {ctx.author.name} for {member.name if member else ctx.author.name}.")
             if not self.api_key or not self.db_params:
                 await self._send_fm_embed(ctx, "Last.fm Error", "Integration not fully configured.", discord.Color.red()); return
@@ -263,6 +264,7 @@ class LastFM(commands.Cog, name="Last.fm"):
 
     @fm_group.command(name="set")
     async def fm_set(self, ctx: commands.Context, lastfm_username: str):
+        # ... (fm_set logic - same as before) ...
         if not self.db_params or not self.api_key: await self._send_fm_embed(ctx, "Config Error", "Integration not configured.", discord.Color.red()); return
         validation_params = {"method": "user.getinfo", "user": lastfm_username}
         validation_data = await self._call_lastfm_api(validation_params)
@@ -279,6 +281,7 @@ class LastFM(commands.Cog, name="Last.fm"):
 
     @fm_group.command(name="remove", aliases=["unset"])
     async def fm_remove(self, ctx: commands.Context):
+        # ... (fm_remove logic - same as before) ...
         if not self.db_params: await self._send_fm_embed(ctx, "DB Error", "Database not configured.", discord.Color.red()); return
         try:
             with self._get_db_connection() as conn:
@@ -293,6 +296,7 @@ class LastFM(commands.Cog, name="Last.fm"):
     @fm_group.command(name="topartists", aliases=["ta", "tar"])
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def fm_top_artists(self, ctx: commands.Context, member: Optional[discord.Member] = None, period_input: str = "overall", limit: int = 5):
+        # ... (fm_top_artists logic - same as before) ...
         if not self.api_key or not self.db_params: await self._send_fm_embed(ctx, "Last.fm Error", "Integration not configured.", discord.Color.red()); return
         target_user = member or ctx.author
         lastfm_username = await self._get_lastfm_username_from_db(target_user.id)
@@ -318,14 +322,47 @@ class LastFM(commands.Cog, name="Last.fm"):
 
     @fm_group.command(name="collage", aliases=["col"])
     @commands.cooldown(1, 30, commands.BucketType.user)
-    async def fm_collage(self, ctx: commands.Context, member: Optional[discord.Member] = None, period_input: str = "overall", grid_size_str: str = "3x3"):
+    async def fm_collage(self, ctx: commands.Context, 
+                         arg1: Optional[Union[discord.Member, str]] = None, 
+                         arg2: Optional[str] = None, 
+                         arg3: Optional[str] = None):
+        """
+        Generates an album art collage for a user's top albums.
+        Usage: .fm collage [@user] [grid_size] [period]
+        Example: .fm col @User 3x3 7d
+                 .fm col 4x4 1m
+                 .fm col 7d (assumes 3x3 grid for ctx.author)
+                 .fm col (assumes 3x3 grid, overall period for ctx.author)
+        """
         if not PILLOW_AVAILABLE:
-            await self._send_fm_embed(ctx, "Feature Disabled", "The Pillow image library is not installed on the bot. Album collage feature is unavailable.", discord.Color.red()) # Corrected call
+            await self._send_fm_embed(ctx, title="Feature Disabled", description="The Pillow image library is not installed on the bot. Album collage feature is unavailable.", color=discord.Color.red())
             return
         if not self.api_key or not self.db_params:
             await self._send_fm_embed(ctx, "Last.fm Error", "Integration not configured.", discord.Color.red()); return
 
-        target_user = member or ctx.author
+        target_user: discord.Member = ctx.author
+        grid_size_str: str = "3x3"
+        period_input: str = "overall"
+
+        # Parse arguments manually due to flexible order
+        if isinstance(arg1, discord.Member):
+            target_user = arg1
+            if isinstance(arg2, str) and 'x' in arg2.lower(): # arg2 is likely grid_size
+                grid_size_str = arg2
+                if isinstance(arg3, str): period_input = arg3
+            elif isinstance(arg2, str): # arg2 is likely period
+                period_input = arg2
+                # grid_size_str remains default
+        elif isinstance(arg1, str) and 'x' in arg1.lower(): # arg1 is grid_size
+            grid_size_str = arg1
+            if isinstance(arg2, str): period_input = arg2
+        elif isinstance(arg1, str): # arg1 is period
+            period_input = arg1
+            # grid_size_str remains default
+        
+        print(f"[LastFM DEBUG fm_collage] Parsed - Target: {target_user.name}, Grid: {grid_size_str}, Period: {period_input}")
+
+
         lastfm_username = await self._get_lastfm_username_from_db(target_user.id)
         if not lastfm_username:
             msg = "Set your Last.fm username with `.fm set <username>`." if target_user == ctx.author else f"{target_user.display_name} hasn't set username."
@@ -357,8 +394,14 @@ class LastFM(commands.Cog, name="Last.fm"):
         for album_info in albums_data[:num_albums]: 
             if not isinstance(album_info, dict): continue
             art_url = None
-            for img_dict in reversed(album_info.get('image', [])): 
-                if isinstance(img_dict, dict) and img_dict.get('#text'): art_url = img_dict['#text']; break
+            # Prefer extralarge, then large, then medium, then small, then any
+            size_preference = ['extralarge', 'large', 'medium', 'small', '']
+            for size_key in size_preference:
+                for img_dict in album_info.get('image', []): 
+                    if isinstance(img_dict, dict) and img_dict.get('size') == size_key and img_dict.get('#text'):
+                        art_url = img_dict['#text']
+                        break
+                if art_url: break
             image_urls.append(art_url if art_url and art_url.strip() else self.user_placeholder_album_art)
         
         collage_bytes_io = await self._create_collage_image(image_urls, (rows, cols))
@@ -370,6 +413,7 @@ class LastFM(commands.Cog, name="Last.fm"):
 
 
     # --- Error Handlers ---
+    # (Error handlers for fm_group, fm_set, fm_top_artists remain the same)
     @fm_group.error
     async def fm_group_error(self, ctx, error):
         print(f"[LastFM DEBUG fm_group_error] Error handler triggered: {type(error).__name__} - {error}")
@@ -405,6 +449,8 @@ class LastFM(commands.Cog, name="Last.fm"):
         print(f"[LastFM DEBUG fm_collage_error] Error handler triggered: {type(error).__name__} - {error}")
         if isinstance(error, commands.CommandOnCooldown): await self._send_fm_embed(ctx, "Cooldown", f"Collage command on cooldown. Try again in {error.retry_after:.2f}s.", discord.Color.orange())
         elif isinstance(error, commands.MemberNotFound): await self._send_fm_embed(ctx, "User Not Found", f"Could not find user: {error.argument}", discord.Color.red())
+        elif isinstance(error, commands.MissingRequiredArgument): # This might trigger if parsing fails early
+             await self._send_fm_embed(ctx, "Missing Argument", f"Missing argument: {error.param.name if hasattr(error, 'param') else 'unknown'}. Usage: `.fm collage [@user] [grid] [period]`", discord.Color.red())
         else: await self._send_fm_embed(ctx, "Collage Error", f"An unexpected error occurred: {error}", discord.Color.red()); print(f"Error in fm_collage: {error}"); traceback.print_exc()
 
 
