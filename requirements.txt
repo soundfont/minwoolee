@@ -3,3 +3,5 @@ python-dotenv
 psycopg2-binary
 aiohttp
 Pillow
+PyNaCl
+yt-dlp
