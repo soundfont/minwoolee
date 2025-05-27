@@ -65,12 +65,12 @@ class MinwooLeeVoiceCog(commands.Cog, name="VoiceMaster (MinwooLee)"):
     async def _create_branded_embed(self, ctx, title, description="", color=0x1262DE):
         """Helper to create consistently branded embeds."""
         embed = discord.Embed(title=title, description=description, color=color)
-        author_name = "MinwooLee's VoiceMaster"
+        author_name = "VoiceMaster"
         author_icon_url = None
         if ctx.guild and ctx.guild.icon:
             author_icon_url = ctx.guild.icon.url
         embed.set_author(name=author_name, icon_url=author_icon_url)
-        embed.set_footer(text="VoiceMaster by MinwooLee")
+        embed.set_footer(text="minwoolee")
         return embed
 
     @commands.Cog.listener()
@@ -234,7 +234,7 @@ class MinwooLeeVoiceCog(commands.Cog, name="VoiceMaster (MinwooLee)"):
                 f"`{ctx.prefix}vc setup` - Interactive setup for server owner.\n"
                 f"`{ctx.prefix}vc setguildlimit <number>` - Sets default user limit for new temp channels on this server (0 for unlimited)."
             )
-            help_embed = await self._create_branded_embed(ctx, "MinwooLee's VoiceMaster Help", desc)
+            help_embed = await self._create_branded_embed(ctx, "VoiceMaster Help", desc)
             await ctx.send(embed=help_embed)
 
     @vc.command(name="setup")
