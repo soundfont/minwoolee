@@ -231,11 +231,11 @@ class MinwooLeeVoiceCog(commands.Cog, name="VoiceMaster (MinwooLee)"):
                 f"**Create Your Channel:** Join the designated 'Join to Create' voice channel.\n\n"
                 f"**Available Commands:**\n"
                 f"*(Manage your own temporary channel)*\n"
-                f"`{ctx.prefix}vc lock` - Locks your channel (only permitted users can join).\n"
+                f"`{ctx.prefix}vc lock` - Locks your channel (only allowedted users can join).\n"
                 f"`{ctx.prefix}vc unlock` - Unlocks your channel for everyone.\n"
                 f"`{ctx.prefix}vc name <new channel name>` - Renames your channel.\n"
                 f"`{ctx.prefix}vc limit <number>` - Sets user limit (0 for unlimited).\n"
-                f"`{ctx.prefix}vc permit @user` - Allows a specific user to join your locked channel.\n"
+                f"`{ctx.prefix}vc allow @user` - Allows a specific user to join your locked channel.\n"
                 f"`{ctx.prefix}vc reject @user` - Removes user's permission & kicks them if in channel.\n"
                 f"`{ctx.prefix}vc claim` - Claims an orphaned temporary channel you are in.\n\n"
                 f"*(Admin Commands)*\n"
@@ -346,7 +346,7 @@ class MinwooLeeVoiceCog(commands.Cog, name="VoiceMaster (MinwooLee)"):
             await channel.set_permissions(ctx.guild.default_role, connect=False)
             await channel.set_permissions(ctx.author, connect=True) # Ensure owner can still connect
             conn.commit() # Commit DB changes if _get_user_channel cleaned anything
-            await ctx.send(embed=await self._create_branded_embed(ctx, "Channel Locked 🔒", f"Your channel '{channel.name}' is now locked. Only permitted users can join."))
+            await ctx.send(embed=await self._create_branded_embed(ctx, "Channel Locked 🔒", f"Your channel '{channel.name}' is now locked. Only allowed users can join."))
         except discord.Forbidden:
             await ctx.send(embed=await self._create_branded_embed(ctx, "Permission Error", "I lack permissions to modify your channel's settings."))
         except Exception as e:
@@ -373,9 +373,9 @@ class MinwooLeeVoiceCog(commands.Cog, name="VoiceMaster (MinwooLee)"):
         finally:
             if conn: conn.close()
 
-    @vc.command(name="permit", aliases=["allow"])
-    async def vc_permit(self, ctx: commands.Context, member: discord.Member):
-        """Permits a specific user to join your locked channel."""
+    @vc.command(name="allow", aliases=["permit"])
+    async def vc_allow(self, ctx: commands.Context, member: discord.Member):
+        """Allows a specific user to join your locked channel."""
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
         try:
@@ -384,15 +384,15 @@ class MinwooLeeVoiceCog(commands.Cog, name="VoiceMaster (MinwooLee)"):
 
             await channel.set_permissions(member, connect=True, view_channel=True)
             conn.commit()
-            await ctx.send(embed=await self._create_branded_embed(ctx, "User Permitted ✅", f"{member.mention} can now join '{channel.name}'."))
+            await ctx.send(embed=await self._create_branded_embed(ctx, "User Allowed ✅", f"{member.mention} can now join '{channel.name}'."))
         except discord.Forbidden:
             await ctx.send(embed=await self._create_branded_embed(ctx, "Permission Error", "I lack permissions to modify your channel's settings for that user."))
         except Exception as e:
-            await ctx.send(embed=await self._create_branded_embed(ctx, "Error", f"Could not permit user: {e}"))
+            await ctx.send(embed=await self._create_branded_embed(ctx, "Error", f"Could not allow user: {e}"))
         finally:
             if conn: conn.close()
 
-    @vc.command(name="reject", aliases=["deny"])
+    @vc.command(name="reject", aliases=["kick"])
     async def vc_reject(self, ctx: commands.Context, member: discord.Member):
         """Revokes a user's permission and kicks them if they are in your channel."""
         conn = sqlite3.connect(self.db_name)
@@ -549,7 +549,7 @@ class MinwooLeeVoiceCog(commands.Cog, name="VoiceMaster (MinwooLee)"):
     @vc_setguildlimit.error
     @vc_lock.error
     @vc_unlock.error
-    @vc_permit.error
+    @vc_allow.error
     @vc_reject.error
     @vc_limit.error
     @vc_name.error
