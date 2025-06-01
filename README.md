@@ -2,9 +2,9 @@
 
 **minwoolee** is a comprehensive Discord bot featuring advanced **moderation tools**, **utility functions**, **music playback**, **voice channel management**, and **entertainment features**. Built with Python and discord.py, it provides a clean, consistent interface with server-branded embeds and robust database integration.
 
-> 🚧 **Active Development**: This bot is continuously evolving with new features and improvements being added regularly by our development team.
+> **Active Development**: This bot is continuously evolving with new features and improvements being added regularly by our development team.
 
-## ✨ Key Features
+## Key Features
 
 ### 🛡️ **Moderation & Safety**
 - **Role-based punishments** with automatic logging
@@ -35,7 +35,7 @@
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Python 3.8+
@@ -54,7 +54,7 @@
 
 ---
 
-## 📋 Command Reference
+## Command Reference
 
 ### 🛡️ **Moderation Commands**
 
@@ -204,15 +204,6 @@ The bot automatically adds poll reactions to messages containing:
 
 ---
 
-## 🔧 **Configuration**
-
-### **Environment Variables**
-```env
-DATABASE_URL=postgresql://user:pass@host:port/dbname
-LASTFM_API_KEY=your_lastfm_api_key
-# Discord bot token configured via hosting platform
-```
-
 ### **Bot Setup Checklist**
 1. ✅ **Invite bot** with required permissions
 2. ✅ **Run** `.autorole set @role` for new member management
@@ -287,5 +278,3 @@ We welcome contributions! Please check our issues page for features in developme
 - **Discord**: Contact the development team for technical support
 
 ---
-
-*Built with ❤️ using Discord.py • Designed for reliability and scalability*
