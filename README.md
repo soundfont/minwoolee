@@ -244,8 +244,8 @@ All bot responses use **consistent, branded embeds** featuring:
 ## 👥 **Development Team**
 
 **Core Developers:**
-- [**soundfont**](https://github.com/soundfont) - Lead Developer
-- [**Rafan Ahmed**](https://github.com/RafanAhmed) - Core Contributor
+- [**soundfont**](https://github.com/soundfont) - Core Developer
+- [**Rafan Ahmed**](https://github.com/RafanAhmed) - Core Developer
 
 **Contributing:**
 We welcome contributions! Please check our issues page for features in development or bug reports.
