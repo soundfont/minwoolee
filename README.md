@@ -204,15 +204,6 @@ The bot automatically adds poll reactions to messages containing:
 
 ---
 
-### **Bot Setup Checklist**
-1. ✅ **Invite bot** with required permissions
-2. ✅ **Run** `.autorole set @role` for new member management
-3. ✅ **Run** `.vc setup` for voice channel features
-4. ✅ **Configure** moderation roles and hierarchy
-5. ✅ **Test** key features (ban, music, voice creation)
-
----
-
 ## 🎨 **Embed System**
 
 All bot responses use **consistent, branded embeds** featuring:
@@ -249,25 +240,6 @@ All bot responses use **consistent, branded embeds** featuring:
 
 **Contributing:**
 We welcome contributions! Please check our issues page for features in development or bug reports.
-
----
-
-## 📜 **Version History**
-
-### **Current Version**: 2.0
-- ✨ **Full PostgreSQL integration** for all persistent features
-- 🎵 **Enhanced music system** with improved YouTube support
-- 🔊 **Complete voice channel management** with MinwooLee VoiceMaster
-- 📊 **Advanced reaction statistics** and leaderboards
-- 🎨 **Revamped embed system** with consistent branding
-- 🛡️ **Comprehensive moderation** with detailed history tracking
-
-### **Upcoming Features** (In Development)
-- 📈 **Advanced server analytics** and insights
-- 🎮 **Game integration** and activity tracking
-- 🤖 **Custom command creation** for server administrators
-- 🌐 **Multi-language support** for international servers
-- 📱 **Mobile-optimized** command responses
 
 ---
 
