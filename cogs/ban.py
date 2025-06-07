@@ -16,7 +16,7 @@ class Ban(commands.Cog):
             embed.set_footer(text=f"Command by {ctx.author.name}", icon_url=ctx.author.display_avatar.url if ctx.author.avatar else None)
         await ctx.send(embed=embed)
 
-    @commands.command(name="ban")
+    @commands.command(aliases=['ban', 'rape'])
     @commands.has_permissions(ban_members=True) # User needs Ban Members permission
     @commands.bot_has_permissions(ban_members=True) # Bot needs Ban Members permission
     async def ban_command(self, ctx: commands.Context, member: discord.Member, *, reason: str = None):
