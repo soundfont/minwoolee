@@ -6,7 +6,7 @@ import asyncio
 import os
 from urllib.parse import urlparse
 from typing import Optional
-
+# Code change
 # --- Database Schema (PostgreSQL Version) ---
 # CREATE TABLE IF NOT EXISTS vm_guild (
 #     guild_id BIGINT PRIMARY KEY,
